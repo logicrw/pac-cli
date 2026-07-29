@@ -1,0 +1,13 @@
+pac-cli
+=======
+
+This project is derived from bpc-fetch (MIT License)
+  https://github.com/Sophomoresty/bpc-fetch
+  Copyright (c) Sophomoresty and contributors
+
+Site bypass rules and strategy data originate from Bypass Paywalls Clean (MIT License)
+  https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean
+  Copyright (c) magnolia1234 and contributors
+
+This software is provided for educational and personal research purposes, AS IS,
+without warranty of any kind.

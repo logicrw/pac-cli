@@ -1,7 +1,10 @@
-"""Playwright-based browser fetch for block_js sites."""
+"""Playwright-based browser fetch for block_js / dom_cleanup sites."""
+from __future__ import annotations
+
 import asyncio
 import re
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
@@ -9,6 +12,17 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from .sites import SiteStrategy
 
 BROWSER_TIMEOUT = 30000
+
+
+@dataclass
+class BrowserResult:
+    ok: bool
+    html: str = ""
+    status: int = 0
+    engine: str = "playwright"
+    dom_result: dict | None = None
+    error_code: str = ""
+    error_msg: str = ""
 
 
 async def ensure_browser() -> dict:
@@ -39,7 +53,15 @@ class BrowserPool:
         self._sem = asyncio.Semaphore(max_contexts)
 
     async def start(self):
-        self._pw = await async_playwright().start()
+        # Prefer patchright if installed (§15.2.7 optional)
+        try:
+            from patchright.async_api import async_playwright as _ap
+
+            self._engine = "patchright"
+            self._pw = await _ap().start()
+        except Exception:
+            self._engine = "playwright"
+            self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch(headless=True)
 
     async def stop(self):
@@ -49,10 +71,19 @@ class BrowserPool:
             await self._pw.stop()
 
     @asynccontextmanager
-    async def page(self):
+    async def page(self, strategy: SiteStrategy | None = None):
         async with self._sem:
+            # late import avoids circular import with strategy.py
+            from .strategy import build_headers
+
+            headers = build_headers(strategy) if strategy else {}
+            ua = headers.pop("User-Agent", None) or (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+            )
             ctx = await self._browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+                user_agent=ua,
+                extra_http_headers=headers or None,
             )
             pg = await ctx.new_page()
             try:
@@ -102,32 +133,30 @@ def _regex_to_glob(regex_part: str) -> str:
     return s
 
 
-async def fetch_with_browser(
+async def fetch_for_strategy(
     url: str,
-    strategy: SiteStrategy,
+    strategy: SiteStrategy | None,
     pool: BrowserPool | None = None,
-) -> tuple[str, int]:
-    """Fetch page using Playwright, blocking paywall scripts via route."""
+) -> BrowserResult:
+    """Fetch with route blocking + unhide; return BrowserResult."""
     own_pool = pool is None
     if own_pool:
         pool = BrowserPool(max_contexts=1)
         await pool.start()
-
+    engine = getattr(pool, "_engine", "playwright")
     try:
-        async with pool.page() as page:
-            # Set custom UA if strategy specifies one
-            if strategy.useragent_custom:
-                await page.set_extra_http_headers({"User-Agent": strategy.useragent_custom})
-
-            route_patterns = _build_route_patterns(strategy)
-            for pattern in route_patterns:
-                try:
-                    await page.route(pattern, lambda route: route.abort())
-                except Exception:
-                    pass
-
-            # Block common paywall providers
-            for provider in ["piano.io", "tinypass.com", "poool.fr", "zephr.com", "pelcro.com", "sophi.io"]:
+        async with pool.page(strategy) as page:
+            if strategy:
+                route_patterns = _build_route_patterns(strategy)
+                for pattern in route_patterns:
+                    try:
+                        await page.route(pattern, lambda route: route.abort())
+                    except Exception:
+                        pass
+            for provider in [
+                "piano.io", "tinypass.com", "poool.fr", "zephr.com",
+                "pelcro.com", "sophi.io", "cxense.com", "fortress-client",
+            ]:
                 try:
                     await page.route(f"**/*{provider}*", lambda route: route.abort())
                 except Exception:
@@ -136,39 +165,64 @@ async def fetch_with_browser(
             try:
                 resp = await page.goto(url, wait_until="domcontentloaded", timeout=BROWSER_TIMEOUT)
                 status = resp.status if resp else 0
-            except Exception:
-                status = 0
+            except Exception as e:
+                return BrowserResult(
+                    ok=False, engine=engine, error_code="BROWSER_UNAVAILABLE", error_msg=str(e)[:300]
+                )
 
-            # Wait for article content to render
             try:
-                await page.wait_for_selector("article, [data-article], .article-body, .story-body, .post-content", timeout=8000)
+                await page.wait_for_selector(
+                    "article, [data-article], .article-body, .story-body, .post-content",
+                    timeout=8000,
+                )
             except Exception:
                 pass
             await page.wait_for_timeout(2000)
 
-            # Remove paywall overlays and restore hidden content
-            await page.evaluate("""() => {
-                // Remove paywall overlays
-                document.querySelectorAll('[class*="paywall"], [class*="gate"], [class*="piano"], [id*="paywall"], [class*="subscriber"]').forEach(el => {
-                    if (el.style) el.style.display = 'none';
+            await page.evaluate(
+                """() => {
+                document.querySelectorAll(
+                  '[class*="paywall"],[class*="gate"],[class*="piano"],[id*="paywall"],[class*="subscriber"]'
+                ).forEach(el => { if (el.style) el.style.display = 'none'; });
+                document.querySelectorAll(
+                  'article,[data-article],.article-body,.story-body,.post-content'
+                ).forEach(el => {
+                  el.style.overflow = 'visible';
+                  el.style.maxHeight = 'none';
+                  el.style.height = 'auto';
+                  el.style.visibility = 'visible';
                 });
-                // Unhide article body
-                document.querySelectorAll('article, [data-article], .article-body, .story-body').forEach(el => {
-                    el.style.overflow = 'visible';
-                    el.style.maxHeight = 'none';
-                    el.style.height = 'auto';
-                });
-                // Remove overflow hidden from body
                 document.body.style.overflow = 'auto';
                 document.documentElement.style.overflow = 'auto';
-            }""")
-
+            }"""
+            )
             await page.wait_for_timeout(500)
+            dom_result = await extract_article_dom(page)
             html = await page.content()
-            return html, status if status else 200
+            return BrowserResult(
+                ok=True,
+                html=html,
+                status=status or 200,
+                engine=engine,
+                dom_result=dom_result,
+            )
+    except Exception as e:
+        return BrowserResult(
+            ok=False, engine=engine, error_code="BROWSER_UNAVAILABLE", error_msg=str(e)[:300]
+        )
     finally:
         if own_pool:
             await pool.stop()
+
+
+async def fetch_with_browser(
+    url: str,
+    strategy: SiteStrategy,
+    pool: BrowserPool | None = None,
+) -> tuple[str, int]:
+    """Back-compat wrapper."""
+    br = await fetch_for_strategy(url, strategy, pool=pool)
+    return br.html, br.status if br.ok else 0
 
 
 async def extract_article_dom(page: Page) -> dict | None:

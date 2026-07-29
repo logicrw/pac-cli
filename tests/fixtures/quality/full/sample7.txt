@@ -1,0 +1,7 @@
+This is a complete news article used as a quality-gate fixture.
+It contains enough prose to pass the minimum length threshold without any
+subscription or paywall teaser language in the opening section.
+Analysts said the market reacted calmly after the announcement, while
+officials emphasized that negotiations would continue through the week.
+Further paragraphs expand on economic context, international reactions,
+and historical comparisons so that the sample resembles a real story body.

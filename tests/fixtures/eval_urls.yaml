@@ -1,0 +1,7 @@
+version: 1
+note: "Freeze baseline before feature commits; expand to 40+ URLs for B1"
+items:
+  - url: "https://www.example.com/"
+    domain: example.com
+    tier: easy
+    note: "placeholder; replace with real news URLs for B-layer eval"

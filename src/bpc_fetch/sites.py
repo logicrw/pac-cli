@@ -3,7 +3,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 
 
 def _default_sites_js() -> Path:
@@ -26,29 +26,47 @@ class SiteStrategy:
     useragent: str = ""
     useragent_custom: str = ""
     referer: str = ""
+    referer_custom: str = ""  # §15 / A1
     random_ip: str = ""
     allow_cookies: bool = False
     block_regex: str = ""
     cs_dompurify: bool = False
+    amp: bool = False
     group: list[str] = field(default_factory=list)
+    # Unmodeled upstream fields (block_js_inline, remove_cookies_*, cs_code, …) — display only in Phase 1
+    extra: dict = field(default_factory=dict)
+
+    def needs_browser_cleanup(self) -> bool:
+        """cs_dompurify means DOM cleanup in browser, NOT archive (§S / §15)."""
+        return bool(self.cs_dompurify)
 
     def bypass_type(self) -> str:
         if self.useragent_custom:
             return "ua:custom"
         if self.useragent:
             return f"ua:{self.useragent}"
+        if self.referer_custom:
+            return "referer:custom"
         if self.referer:
             return f"referer:{self.referer}"
-        if self.cs_dompurify:
-            return "archive"
         if self.block_regex:
             return "block_js"
+        if self.cs_dompurify:
+            return "dom_cleanup"
         return "cookies"
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["bypass_type"] = self.bypass_type()
         return d
+
+
+def strategy_from_dict(v: dict) -> SiteStrategy:
+    known = {f.name for f in fields(SiteStrategy)}
+    filtered = {k: v[k] for k in v if k in known}
+    if "domain" not in filtered:
+        filtered["domain"] = v.get("domain", "")
+    return SiteStrategy(**filtered)
 
 
 def parse_sites_js(path: Path | None = None) -> dict[str, SiteStrategy]:
@@ -61,36 +79,66 @@ def parse_sites_js(path: Path | None = None) -> dict[str, SiteStrategy]:
     text = re.sub(r"^var grouped_sites\s*=\s*\{.*?\};\s*", "", text, flags=re.DOTALL)
 
     entries = _extract_entries(text)
-    result: dict[str, SiteStrategy] = {}
+    return entries_to_domain_map(entries)
 
-    for name, props in entries.items():
-        domain = props.get("domain", "")
-        if not domain or domain.startswith("###") or domain.startswith("#options_"):
-            group = props.get("group", [])
-            if group and domain.startswith("###"):
-                for d in group:
-                    strat = _build_strategy(d, name, props)
-                    result[d] = strat
-            continue
-        strat = _build_strategy(domain, name, props)
-        result[domain] = strat
 
-    return result
+_KNOWN_PROP_KEYS = frozenset({
+    "domain", "useragent", "useragent_custom", "referer", "referer_custom",
+    "random_ip", "allow_cookies", "block_regex", "block_regex_str",
+    "cs_dompurify", "amp", "group", "name",
+})
 
 
 def _build_strategy(domain: str, name: str, props: dict) -> SiteStrategy:
+    extra = {
+        k: v for k, v in props.items()
+        if k not in _KNOWN_PROP_KEYS and not k.startswith("_")
+    }
     return SiteStrategy(
         domain=domain,
         name=name,
-        useragent=props.get("useragent", ""),
-        useragent_custom=props.get("useragent_custom", ""),
-        referer=props.get("referer", ""),
-        random_ip=props.get("random_ip", ""),
+        useragent=str(props.get("useragent") or ""),
+        useragent_custom=str(props.get("useragent_custom") or ""),
+        referer=str(props.get("referer") or ""),
+        referer_custom=str(props.get("referer_custom") or ""),
+        random_ip=str(props.get("random_ip") or ""),
         allow_cookies=bool(props.get("allow_cookies")),
-        block_regex=props.get("block_regex_str", ""),
+        block_regex=str(props.get("block_regex_str") or props.get("block_regex") or ""),
         cs_dompurify=bool(props.get("cs_dompurify")),
-        group=props.get("group", []),
+        amp=bool(props.get("amp")),
+        group=list(props.get("group") or []),
+        extra=extra,
     )
+
+
+def entries_to_domain_map(entries: dict[str, dict]) -> dict[str, SiteStrategy]:
+    """Expand site-name entries (incl. ### groups + exception overrides) to domain map.
+
+    Used by parse_sites_js and rules merge (§15.1.1).
+    """
+    result: dict[str, SiteStrategy] = {}
+    for name, props in entries.items():
+        if not isinstance(props, dict):
+            continue
+        domain = str(props.get("domain") or "")
+        # group expansion
+        group = props.get("group") or []
+        if domain.startswith("###") and group:
+            for d in group:
+                result[d] = _build_strategy(d, name, props)
+        elif domain and not domain.startswith("#"):
+            result[domain] = _build_strategy(domain, name, props)
+        # exception overrides (sites_updated style)
+        for ex in props.get("exception") or []:
+            if not isinstance(ex, dict):
+                continue
+            ed = str(ex.get("domain") or "")
+            if not ed:
+                continue
+            # merge base props with exception props (exception wins)
+            merged = {**props, **ex}
+            result[ed] = _build_strategy(ed, name, merged)
+    return result
 
 
 def _extract_entries(text: str) -> dict[str, dict]:
@@ -262,12 +310,12 @@ def get_sites_map(sites_js_path: Path | None = None) -> dict[str, SiteStrategy]:
     js_path = sites_js_path or SITES_JS_DEFAULT
 
     if cache_path.exists() and cache_path.stat().st_mtime >= js_path.stat().st_mtime:
-        data = json.loads(cache_path.read_text())
-        return {k: SiteStrategy(**v) for k, v in data.items()}
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return {k: strategy_from_dict(v) for k, v in data.items()}
 
     sites = parse_sites_js(js_path)
     cache_data = {k: asdict(v) for k, v in sites.items()}
-    cache_path.write_text(json.dumps(cache_data, ensure_ascii=False, indent=2))
+    cache_path.write_text(json.dumps(cache_data, ensure_ascii=False, indent=2), encoding="utf-8")
     return sites
 
 
