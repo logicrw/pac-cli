@@ -1,6 +1,7 @@
 """HTTP / browser / archive fetch with site plan (§15)."""
 from __future__ import annotations
 
+import os
 import random
 import time
 from typing import Any
@@ -27,6 +28,10 @@ REFERER_TWITTER = "https://t.co/"
 
 TIMEOUT = 30.0
 GOOGLEBOT_TIMEOUT = 10.0  # §15.2.3
+
+# archive.is 限流/验证码后的 per-domain 冷却（进程内，batch 共享）（§15.2.4）
+ARCHIVE_IS_COOLDOWN_S = float(os.environ.get("PAC_ARCHIVE_COOLDOWN_S", "300"))
+_archive_is_fail_at: dict[str, float] = {}
 
 
 def build_headers(strategy: SiteStrategy | None) -> dict[str, str]:
@@ -127,9 +132,13 @@ def build_plan(
     if want_browser:
         steps.append("browser_cleanup")
 
-    # archive: after http+browser fail, or force
-    steps.append("archive_is")
-    steps.append("archive_org")
+    # archive 条件触发（§15.2.4）：显式 --archive，或规则/override 的 extra 暗示
+    want_archive = force_archive or bool(
+        strategy and (strategy.extra or {}).get("archive")
+    )
+    if want_archive:
+        steps.append("archive_is")
+        steps.append("archive_org")
     return steps
 
 
@@ -346,7 +355,12 @@ async def fetch_article(
                 continue
 
             if step in ("archive_is", "archive_org"):
-                # only if previous steps failed quality (we're in loop) — always try near end
+                # 限流冷却：本 domain 近期在 archive.is 失败过则跳过（§15.2.4）
+                if step == "archive_is":
+                    last_fail = _archive_is_fail_at.get(domain)
+                    if last_fail and (time.monotonic() - last_fail) < ARCHIVE_IS_COOLDOWN_S:
+                        strategy_hit.append("archive_is_skipped_cooldown")
+                        continue
                 try:
                     if step == "archive_is":
                         arch = f"https://archive.is/newest/{quote(url, safe='')}"
@@ -362,6 +376,8 @@ async def fetch_article(
                         timeout=TIMEOUT,
                     )
                     strategy_hit.append(hit)
+                    if step == "archive_is" and status in (429, 403, 503):
+                        _archive_is_fail_at[domain] = time.monotonic()
                     last_html, last_status = html, status
                     if status == 200 and html_has_content(html):
                         got = await _try_extract_ok(
@@ -377,11 +393,15 @@ async def fetch_article(
                         if got:
                             return got
                 except Exception:
+                    if step == "archive_is":
+                        _archive_is_fail_at[domain] = time.monotonic()
                     strategy_hit.append(f"{step}_error")
                 continue
 
         # final failure classification
-        if last_html:
+        # 仅 200 的页面才值得走抽取/质量门终判；
+        # 403/挑战页直接进 HTTP 状态分类，避免被误报为 EXTRACT_FAILED
+        if last_html and last_status == 200:
             from .extract import extract_article, article_to_markdown
 
             article = extract_article(last_html, url, dom_result=last_dom)
@@ -389,6 +409,22 @@ async def fetch_article(
             title = article.get("title") or ""
             q = quality_check(text, title, allow_partial=allow_partial)
             md = article_to_markdown(article) if text else ""
+            # 早期预筛（html_has_content）与最终抽取不一致时，以最终质量门为准：
+            # 抽取成功且质量通过 → ok，而不是落入 HTTP_BLOCKED 误报
+            if q.ok and text:
+                return ok_result(
+                    url=url,
+                    domain=domain,
+                    title=title,
+                    markdown=md,
+                    strategy_hit=strategy_hit + ["final_quality_pass"],
+                    rule_version=rule_version,
+                    engine="http",
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                    warnings=warnings,
+                    paywall_suspected=q.paywall_suspected,
+                    full_markdown=full_markdown,
+                )
             if q.error_code == "PAYWALL_REMAINING" or q.paywall_suspected:
                 return fail_result(
                     url=url,

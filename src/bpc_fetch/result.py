@@ -142,4 +142,7 @@ def classify_http_failure(status: int, body: str = "") -> tuple[str, str]:
         return "HTTP_BLOCKED", "bot"
     if status >= 500 or status == 0:
         return "NETWORK", "network"
+    if status == 200:
+        # 拿到 200 却走到失败分类：内容不可用（无正文/预筛不过），不是封锁
+        return "EXTRACT_FAILED", "extract"
     return "HTTP_BLOCKED", "strategy"
