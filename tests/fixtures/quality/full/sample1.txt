@@ -1,7 +1,17 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+Touchdown! Carrying NASA Science, Firefly’s Blue Ghost Lands on Moon
+Agency/source: National Aeronautics and Space Administration (NASA)
+Source: https://www.nasa.gov/news-release/touchdown-carrying-nasa-science-fireflys-blue-ghost-lands-on-moon/
+
+Carrying a suite of NASA science and technology, Firefly Aerospace’s Blue Ghost Mission 1 successfully landed at 3:34 a.m. EST on Sunday near a volcanic feature called Mons Latreille within Mare Crisium, a more than 300-mile-wide basin located in the northeast quadrant of the Moon’s near side.
+
+The Blue Ghost lander is in an upright and stable configuration, and the successful Moon delivery is part of NASA’s CLPS (Commercial Lunar Payload Services) initiative and Artemis campaign. This is the first CLPS delivery for Firefly, and their first Moon landing.
+
+The 10 NASA science and technology instruments aboard the lander will operate on the lunar surface for approximately one lunar day, or about 14 Earth days.
+
+Since launching from NASA’s Kennedy Space Center in Florida on Jan. 15, Blue Ghost traveled more than 2.8 million miles, downlinked more than 27 GB of data, and supported several science operations. This included signal tracking from the Global Navigation Satellite System (GNSS) at a record-breaking distance of 246,000 miles with the Lunar GNSS Receiver Experiment payload – showing NASA can use the same positioning systems on Earth when at the Moon. Science conducted during the journey also included radiation tolerant computing through the Van Allen Belts with the Radiation-Tolerant Computer System payload and measurements of magnetic field changes in space with the Lunar Magnetotelluric Sounder payload.
+
+During surface operations, the NASA instruments will test and demonstrate lunar subsurface drilling technology, regolith sample collection capabilities, global navigation satellite system abilities, radiation tolerant computing, and lunar dust mitigation methods. The data captured will benefit humanity by providing insights into how space weather and other cosmic forces impact Earth.
+
+Before payload operations conclude, teams will aim to capture imagery of the lunar sunset and how lunar dust reacts to solar influences during lunar dusk conditions, a phenomenon first documented by former NASA astronaut Eugene Cernan on Apollo 17. Following the lunar sunset, the lander will operate for several hours into the lunar night.
+
+To date, five vendors have been awarded 11 lunar deliveries under CLPS and are sending more than 50 instruments to various locations on the Moon, including the lunar South Pole. Existing CLPS contracts are indefinite-delivery, indefinite-quantity contracts with a cumulative maximum contract value of $2.6 billion through 2028.

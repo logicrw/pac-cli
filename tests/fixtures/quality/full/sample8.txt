@@ -1,7 +1,9 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+Energy Department Announces Actions to Secure American Critical Minerals and Materials Supply Chain
+Agency/source: U.S. Department of Energy (DOE)
+Source: https://www.energy.gov/articles/energy-department-announces-actions-secure-american-critical-minerals-and-materials-supply
+
+WASHINGTON—The U.S. Department of Energy (DOE) today announced its intent to issue notices of funding opportunities (NOFO) totaling nearly $1 billion to advance and scale mining, processing, and manufacturing technologies across key stages of the critical minerals and materials supply chains. The funding announcements, issued in accordance with President Trump’s Executive Order Unleashing American Energy, will help ensure a more secure, predictable, and affordable supply of critical minerals and materials that are foundational to American energy dominance, national security, and industrial competitiveness.
+
+The Advanced Materials and Manufacturing Technologies Office expects to release a NOFO of up to $50 million early this fall through the Critical Minerals and Materials (CMM) Accelerator program. The CMM Accelerator promotes technology maturation that can unlock capital investments and facilitate domestic commercialization. The proposed NOFO addresses several areas of interest, including processes in the rare-earth magnet supply chain; processes to refine and alloy gallium, gallium nitride, germanium, and silicon carbide for use in semiconductors; cost-competitive technologies for direct lithium extraction and separation; and critical-material separation technologies that allow for the co-production of useful products from byproducts and scrap.
+
+The Office of Fossil Energy and Carbon Management is announcing its intent to issue a NOFO to support approximately $250 million of financial assistance for American industrial facilities that have the potential to produce valuable mineral byproducts from existing industrial processes.

@@ -1,7 +1,15 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+NOAA ocean outlook projects cooler deep waters for Gulf of Maine
+Agency/source: National Oceanic and Atmospheric Administration (NOAA)
+Source: https://www.noaa.gov/news-release/noaa-ocean-outlook-projects-cooler-deep-waters-for-gulf-of-maine
+
+The Gulf of Maine, historically one of the fastest-warming ocean regions in the world, is predicted to experience cooler bottom-water temperatures this spring and summer, according to a new experimental outlook developed by NOAA scientists.
+
+Initial signs of this shift were reported by NOAA’s Northeast Fisheries Science Center and documented in the NOAA Fisheries 2025 New England State of the Ecosystem Report.
+
+Data shows that since late 2023, the Northwest Atlantic has seen cooler bottom-water temperatures due to the southward movement of the eastern portion of the Gulf Stream and possibly an increased influx of Labrador Slope and Scotian Shelf water into the system. Researchers expect the Gulf of Maine to be 0.9-1.8 degrees Fahrenheit (0.5-1 degree Celsius) cooler this summer compared to the average summer temperature.
+
+Bottom-water temperatures influence the productivity of groundfish, like cod, haddock, pollock, and several species of flounder, which prefer cooler water. Lobster, the most valuable fishery in the northeast, are also temperature-sensitive. Warming waters along the New England coast in recent decades have contributed to the collapse of the southern New England lobster population while the Gulf of Maine population has boomed. Researchers expect that cooler waters will impact this economically and culturally important species.
+
+The commercial fishing industry in New England is a major economic driver, contributing $1.4 billion in revenue to the regional economy in 2022 and supporting over 280,000 jobs. The industry also has a significant socioeconomic impact on coastal communities.
+
+A companion longer-term outlook, also developed by NOAA scientists, suggests that more frequent inflows of cooler deep waters may continue to temper warming in the basin for the next several years. Continued monitoring is needed to confirm this prediction.

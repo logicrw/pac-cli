@@ -35,8 +35,14 @@ def main():
     p_fetch = sub.add_parser("fetch", help="Fetch article as markdown JSON", parents=[_common])
     p_fetch.add_argument("url", help="Article URL")
     p_fetch.add_argument("--out-dir", type=Path, default=None, help="If set, write .md under this dir")
-    p_fetch.add_argument("--no-images", action="store_true", default=True)
-    p_fetch.add_argument("--images", action="store_true", help="Download images when --out-dir set")
+    image_group = p_fetch.add_mutually_exclusive_group()
+    image_group.add_argument(
+        "--images", dest="images", action="store_true", help="Download images when --out-dir set"
+    )
+    image_group.add_argument(
+        "--no-images", dest="images", action="store_false", help="Do not download images (default)"
+    )
+    p_fetch.set_defaults(images=False)
     p_fetch.add_argument("--allow-partial", action="store_true", help="Accept teaser as ok")
     p_fetch.add_argument("--full", action="store_true", help="Do not truncate markdown in JSON")
     p_fetch.add_argument("--archive", action="store_true", help="Force archive steps earlier")
@@ -90,7 +96,7 @@ def main():
 
 async def _dispatch(args) -> dict:
     if args.command == "doctor":
-        return _cmd_doctor(args)
+        return await _cmd_doctor(args)
     if args.command == "sites":
         return _cmd_sites(args)
     if args.command == "fetch":
@@ -110,8 +116,7 @@ async def _dispatch(args) -> dict:
     }
 
 
-def _cmd_doctor(args) -> dict:
-    from .browser import ensure_browser
+async def _cmd_doctor(args) -> dict:
     from .rules.store import get_sites_map_with_version, load_manifest
 
     issues = []
@@ -132,8 +137,6 @@ def _cmd_doctor(args) -> dict:
         httpx_ok = False
         issues.append("httpx not installed")
 
-    br = asyncio.get_event_loop().run_until_complete(ensure_browser()) if False else None
-    # sync ensure without nested loop issues
     pw_ok = False
     chromium_ok = False
     pw_ver = ""
@@ -141,9 +144,16 @@ def _cmd_doctor(args) -> dict:
         from playwright.async_api import async_playwright  # noqa: F401
         import importlib.metadata
 
+        from .browser import ensure_browser
+
         pw_ok = True
         pw_ver = importlib.metadata.version("playwright")
-        chromium_ok = True
+        browser_status = await ensure_browser()
+        chromium_ok = bool(browser_status.get("ok"))
+        if not chromium_ok:
+            issues.append(browser_status.get("error") or "Chromium could not be launched")
+            if browser_status.get("install_cmd"):
+                issues.append(browser_status["install_cmd"])
     except Exception:
         issues.append("playwright not installed")
 
@@ -212,31 +222,34 @@ async def _cmd_fetch(args) -> dict:
         allow_partial=bool(getattr(args, "allow_partial", False)),
         rule_version=ver,
         force_archive=bool(getattr(args, "archive", False)),
-        full_markdown=bool(getattr(args, "full", False)),
+        full_markdown=bool(getattr(args, "full", False) or args.out_dir),
         use_browser=use_browser,
         domain=domain,
     )
+    image_urls = result.pop("_image_urls", [])
     result["warnings"] = list(result.get("warnings") or []) + list(warnings)
     result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
+
+    if result.get("ok"):
+        result["images"] = 0
+    if getattr(args, "images", False) and not args.out_dir:
+        result["warnings"].append("images_requires_out_dir")
 
     if result.get("ok") and args.out_dir:
         out_dir = Path(args.out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         slug = _slugify(result.get("title") or domain)
-        md_path = out_dir / slug / f"{slug}.md"
+        article_dir = out_dir / slug
+        md_path = article_dir / f"{slug}.md"
         md_path.parent.mkdir(parents=True, exist_ok=True)
-        # write full markdown without truncation for disk
-        full = await fetch_article(
-            args.url,
-            strategy,
-            allow_partial=bool(args.allow_partial),
-            rule_version=ver,
-            full_markdown=True,
-            use_browser=use_browser,
-            domain=domain,
-        )
-        md_path.write_text(full.get("markdown") or result.get("markdown") or "", encoding="utf-8")
+        markdown = result.get("markdown") or ""
+        md_path.write_text(markdown, encoding="utf-8")
         result["path"] = str(md_path)
+        if getattr(args, "images", False):
+            saved_images = await download_images(image_urls, article_dir / "images")
+            result["images"] = len(saved_images)
+        if not getattr(args, "full", False):
+            result["markdown"], result["truncated"] = truncate_markdown(markdown)
 
     return result
 
@@ -287,12 +300,19 @@ async def _cmd_batch(args) -> dict:
                 st,
                 allow_partial=bool(args.allow_partial),
                 rule_version=ver,
-                full_markdown=bool(args.full),
+                full_markdown=bool(args.full or args.out_dir),
                 domain=domain,
             )
-            if not args.full and not args.out_dir:
-                md = r.get("markdown") or ""
-                r["markdown"], _ = truncate_markdown(md, BATCH_SUMMARY_CHARS)
+            r.pop("_image_urls", None)
+            markdown = r.get("markdown") or ""
+            if r.get("ok") and args.out_dir:
+                slug = _slugify(r.get("title") or domain)
+                md_path = Path(args.out_dir) / slug / f"{slug}.md"
+                md_path.parent.mkdir(parents=True, exist_ok=True)
+                md_path.write_text(markdown, encoding="utf-8")
+                r["path"] = str(md_path)
+            if not args.full:
+                r["markdown"], _ = truncate_markdown(markdown, BATCH_SUMMARY_CHARS)
                 r["truncated"] = True
             return r
 

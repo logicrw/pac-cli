@@ -209,6 +209,7 @@ async def _try_extract_ok(
         latency_ms=int((time.perf_counter() - t0) * 1000),
         paywall_suspected=q.paywall_suspected,
         full_markdown=full_markdown,
+        extra={"_image_urls": list(article.get("images") or [])},
     )
 
 
@@ -424,6 +425,7 @@ async def fetch_article(
                     warnings=warnings,
                     paywall_suspected=q.paywall_suspected,
                     full_markdown=full_markdown,
+                    extra={"_image_urls": list(article.get("images") or [])},
                 )
             if q.error_code == "PAYWALL_REMAINING" or q.paywall_suspected:
                 return fail_result(

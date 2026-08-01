@@ -19,6 +19,49 @@ def test_teaser_blocked():
     assert q.error_code == "PAYWALL_REMAINING"
 
 
+def test_real_barrons_teaser_blocked():
+    text = (
+        "AI Investment Is Already Huge. Google, Trump Show Much More Is Coming.\n"
+        "The artificial-intelligence investment tsunami is set to grow more powerful.\n"
+        "Continue reading this article with a Barron’s subscription"
+    )
+    q = quality_check(text, "AI Investment Is Already Huge")
+    assert not q.ok
+    assert q.error_code == "PAYWALL_REMAINING"
+
+
+def test_navigation_shell_is_extract_failure():
+    text = (
+        "Skip Navigation Markets Pre-Markets U.S. Markets Europe Markets "
+        "Investing Club Latest Video Search quotes, news & videos "
+        + ("Watchlist Menu " * 20)
+    )
+    q = quality_check(text, "DO NOT DELETE")
+    assert not q.ok
+    assert not q.paywall_suspected
+    assert q.error_code == "EXTRACT_FAILED"
+
+
+def test_challenge_shells_are_extract_failures():
+    samples = [
+        (
+            "Security Verification",
+            "Verification successful. Waiting for www.ft.com to respond. "
+            "Reason Challenge Request ID abc Status Code 403.",
+        ),
+        (
+            "Access Denied",
+            "You don't have permission to access this article on this server. "
+            "Reference number. https://errors.edgesuite.net/example",
+        ),
+    ]
+    for title, text in samples:
+        q = quality_check(text, title)
+        assert not q.ok
+        assert not q.paywall_suspected
+        assert q.error_code == "EXTRACT_FAILED"
+
+
 def test_short_extract_failed():
     q = quality_check("too short", "t")
     assert not q.ok

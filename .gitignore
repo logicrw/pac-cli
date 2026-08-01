@@ -13,3 +13,6 @@ __pycache__/
 *.pyc
 data/rules/
 dist/
+
+# Added by ggshield
+.cache_ggshield

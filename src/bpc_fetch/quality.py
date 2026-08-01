@@ -22,6 +22,7 @@ _TEASER_MARKERS = (
     "create a free account",
     "this article is for subscribers",
     "to read the full story",
+    "continue reading this article",
     "register for free to continue reading",
     "register to continue",
     "already a subscriber? sign in",
@@ -64,6 +65,30 @@ def is_teaser(title: str, text: str) -> bool:
     return any(m in w for m in _TEASER_MARKERS)
 
 
+def is_navigation_shell(title: str, text: str) -> bool:
+    """Detect publisher navigation mistakenly extracted as article content."""
+    w = _window(title, text)
+    signals = (
+        "skip navigation",
+        "pre-markets",
+        "search quotes, news & videos",
+        "investing club",
+        "latest video",
+    )
+    return "do not delete" in (title or "").lower() and sum(s in w for s in signals) >= 3
+
+
+def is_challenge_shell(title: str, text: str) -> bool:
+    """Detect access-control/challenge pages extracted as article content."""
+    title_lower = (title or "").strip().lower()
+    w = _window(title, text)
+    if title_lower == "security verification":
+        return "challenge" in w and ("status code" in w or "waiting for" in w)
+    if title_lower == "access denied":
+        return "permission to access" in w or "errors.edgesuite.net" in w
+    return False
+
+
 def html_looks_paywalled(html: str) -> bool:
     if not html or len(html) < 200:
         return True
@@ -94,6 +119,20 @@ def quality_check(
             ok=False,
             paywall_suspected=False,
             reason=f"content_chars={len(t)} < {MIN_CONTENT_CHARS}",
+            error_code="EXTRACT_FAILED",
+        )
+    if is_navigation_shell(title, t):
+        return QualityResult(
+            ok=False,
+            paywall_suspected=False,
+            reason="navigation_shell",
+            error_code="EXTRACT_FAILED",
+        )
+    if is_challenge_shell(title, t):
+        return QualityResult(
+            ok=False,
+            paywall_suspected=False,
+            reason="challenge_shell",
             error_code="EXTRACT_FAILED",
         )
     teaser = is_teaser(title, t)

@@ -10,9 +10,12 @@ def _default_sites_js() -> Path:
     """Locate sites.js: PyInstaller bundle → package data → home fallback."""
     if getattr(sys, '_MEIPASS', None):
         return Path(sys._MEIPASS) / "data" / "sites.js"
-    pkg_data = Path(__file__).parent.parent.parent / "data" / "sites.js"
-    if pkg_data.exists():
-        return pkg_data
+    packaged_data = Path(__file__).parent / "data" / "sites.js"
+    if packaged_data.exists():
+        return packaged_data
+    repo_data = Path(__file__).parent.parent.parent / "data" / "sites.js"
+    if repo_data.exists():
+        return repo_data
     return Path.home() / "code/clis/bpc-fetch/data/sites.js"
 
 
@@ -30,6 +33,11 @@ class SiteStrategy:
     random_ip: str = ""
     allow_cookies: bool = False
     block_regex: str = ""
+    # Singular fields preserve each upstream rule's source semantics.
+    block_regex_general: str = ""
+    excluded_domains: list[str] = field(default_factory=list)
+    # Effective global blockers applicable to this target domain.
+    general_block_regexes: list[str] = field(default_factory=list)
     cs_dompurify: bool = False
     amp: bool = False
     group: list[str] = field(default_factory=list)
@@ -85,7 +93,7 @@ def parse_sites_js(path: Path | None = None) -> dict[str, SiteStrategy]:
 _KNOWN_PROP_KEYS = frozenset({
     "domain", "useragent", "useragent_custom", "referer", "referer_custom",
     "random_ip", "allow_cookies", "block_regex", "block_regex_str",
-    "cs_dompurify", "amp", "group", "name",
+    "block_regex_general", "excluded_domains", "cs_dompurify", "amp", "group", "name",
 })
 
 
@@ -104,6 +112,8 @@ def _build_strategy(domain: str, name: str, props: dict) -> SiteStrategy:
         random_ip=str(props.get("random_ip") or ""),
         allow_cookies=bool(props.get("allow_cookies")),
         block_regex=str(props.get("block_regex_str") or props.get("block_regex") or ""),
+        block_regex_general=str(props.get("block_regex_general") or ""),
+        excluded_domains=list(props.get("excluded_domains") or []),
         cs_dompurify=bool(props.get("cs_dompurify")),
         amp=bool(props.get("amp")),
         group=list(props.get("group") or []),
@@ -138,7 +148,64 @@ def entries_to_domain_map(entries: dict[str, dict]) -> dict[str, SiteStrategy]:
             # merge base props with exception props (exception wins)
             merged = {**props, **ex}
             result[ed] = _build_strategy(ed, name, merged)
+
+    general_rules: list[tuple[str, list[str]]] = []
+    seen_general_rules: set[tuple[str, tuple[str, ...]]] = set()
+
+    for props in entries.values():
+        if not isinstance(props, dict):
+            continue
+        if "group" in props:
+            source_domains = props.get("group") or []
+        else:
+            source_domain = props.get("domain")
+            source_domains = [source_domain] if source_domain else []
+        if isinstance(source_domains, str):
+            source_domains = source_domains.split(",")
+
+        exceptions = props.get("exception") or []
+        for source_domain in source_domains:
+            source_domain = str(source_domain)
+            selected_rule = props
+            for exception in exceptions:
+                if not isinstance(exception, dict):
+                    continue
+                exception_domains = exception.get("domain")
+                matches = (
+                    exception_domains == source_domain
+                    if isinstance(exception_domains, str)
+                    else source_domain in (exception_domains or [])
+                )
+                if matches:
+                    selected_rule = exception
+                    break
+
+            pattern = str(selected_rule.get("block_regex_general") or "")
+            if not pattern:
+                continue
+            materialized = pattern.replace("{domain}", re.escape(source_domain))
+            excluded_domains = list(selected_rule.get("excluded_domains") or [])
+            key = (materialized, tuple(excluded_domains))
+            if key not in seen_general_rules:
+                seen_general_rules.add(key)
+                general_rules.append((materialized, excluded_domains))
+
+    for target_domain, strategy in result.items():
+        for pattern, excluded_domains in general_rules:
+            if _domain_is_excluded(target_domain, excluded_domains):
+                continue
+            if pattern not in strategy.general_block_regexes:
+                strategy.general_block_regexes.append(pattern)
     return result
+
+
+def _domain_is_excluded(domain: str, excluded_domains: list[str]) -> bool:
+    target = domain.lower().removeprefix("www.").rstrip(".")
+    for excluded in excluded_domains:
+        normalized = str(excluded).lower().removeprefix("www.").rstrip(".")
+        if normalized and (target == normalized or target.endswith("." + normalized)):
+            return True
+    return False
 
 
 def _extract_entries(text: str) -> dict[str, dict]:

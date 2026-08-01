@@ -1,7 +1,11 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+USGS releases a comprehensive look at water resources in the United States
+Agency/source: U.S. Geological Survey (USGS)
+Source: https://www.usgs.gov/news/national-news-release/usgs-releases-a-comprehensive-look-water-resources-united-states
+
+RESTON, Va. — The U.S. Geological Survey (USGS) today released the National Water Availability Assessment, a pioneering scientific overview of water availability that offers first-of-its-kind insights into the balance between water supply and demand across the conterminous United States.
+
+The assessment found that nearly 30 million people live in areas where available surface-water supplies are limited relative to water use, indicating a high level of water limitation. More people living in areas with high water limitation were socially vulnerable compared to those living in areas with lower water limitation and more available water. With the United States facing growing challenges related to water availability, the assessment provides key insights into understanding where shortages exist, where surpluses can be found and the quality of the water.
+
+Unlike previous national water availability assessments, which relied solely on data from locations where water was directly measured, this new assessment utilizes state-of-the-art models to fill the gaps between monitoring sites. In addition, prior assessments examined water quality and water use separately, while the new assessment integrates water quality and use for a more comprehensive understanding of water availability. This assessment covers the period from 2010 to 2020, providing insights into the average conditions during that time.
+
+The assessment report is accompanied by the National Water Availability Assessment Data Companion (Data Companion), a user-friendly online platform designed to provide access to underlying datasets used in the assessment. The Data Companion offers tools that policymakers, resource managers and scientists can use to retrieve information to better understand the state of water across the United States.

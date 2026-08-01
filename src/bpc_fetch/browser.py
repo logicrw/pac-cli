@@ -5,6 +5,7 @@ import asyncio
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
@@ -27,12 +28,6 @@ class BrowserResult:
 
 async def ensure_browser() -> dict:
     """Check if Playwright Chromium is installed. Returns status dict."""
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        driver = compute_driver_executable()
-        return {"ok": True, "driver": str(driver)}
-    except Exception:
-        pass
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -133,6 +128,29 @@ def _regex_to_glob(regex_part: str) -> str:
     return s
 
 
+def _compile_general_block_regexes(strategy: SiteStrategy) -> list[re.Pattern[str]]:
+    """Compile global BPC blockers for a target, ignoring malformed rules."""
+    compiled = []
+    for pattern in strategy.general_block_regexes:
+        try:
+            compiled.append(re.compile(pattern))
+        except re.error:
+            continue
+    return compiled
+
+
+async def _handle_general_block_route(route, patterns: list[re.Pattern[str]]) -> None:
+    request = route.request
+    should_abort = (
+        request.resource_type in {"script", "xhr", "fetch"}
+        and any(pattern.search(request.url) for pattern in patterns)
+    )
+    if should_abort:
+        await route.abort()
+    else:
+        await route.continue_()
+
+
 async def fetch_for_strategy(
     url: str,
     strategy: SiteStrategy | None,
@@ -147,6 +165,12 @@ async def fetch_for_strategy(
     try:
         async with pool.page(strategy) as page:
             if strategy:
+                general_patterns = _compile_general_block_regexes(strategy)
+                if general_patterns:
+                    await page.route(
+                        "**/*",
+                        partial(_handle_general_block_route, patterns=general_patterns),
+                    )
                 route_patterns = _build_route_patterns(strategy)
                 for pattern in route_patterns:
                     try:

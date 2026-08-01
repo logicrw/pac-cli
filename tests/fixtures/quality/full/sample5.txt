@@ -1,7 +1,11 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+Twins grow more slowly in early pregnancy than previously thought
+Agency/source: National Institutes of Health (NIH)
+Source: https://www.nih.gov/news-events/news-releases/twins-grow-more-slowly-early-pregnancy-previously-thought
+
+Twins—smaller at birth, on average, than singletons—start out smaller in pregnancy than was previously known, according to a study by researchers at the National Institutes of Health (NIH). The ultrasound study revealed that twins have less fat tissue and less muscle mass than singletons beginning at 15 weeks of pregnancy. If results are confirmed by additional research, the findings could provide information to guide physicians in monitoring and managing twin pregnancies.
+
+Researchers analyzed data from previous ultrasound studies of fetal development in the uterus. Included in the analysis were 3D ultrasound scans of 2,604 singleton pregnancies and 315 twins. All twin pairs had individual placentas. Twin pairs who shared a placenta were not included in the analysis.
+
+Beginning at 15 weeks, thigh volumes were significantly smaller for twins than singletons. Twins had smaller fat and lean thigh volumes than singletons. They also had a lower thigh fat to lean ratio than singletons, having proportionately 2.7 to 4.2% less fat from 15 to 37 weeks. Previous studies of twin growth in the womb involved 2D ultrasound scans and had documented decreased twin growth relative to singletons only in the early 3rd trimester (28 to 40 weeks).
+
+Scientists do not think the twins early small size resulted from increased competition for nutrients as their placentas should have been developed enough to supply needed resources until the third trimester. Rather, they hypothesize that twins’ small size early in pregnancy could be an adaptation to accommodate the need for increased resources of two fetuses later in pregnancy.

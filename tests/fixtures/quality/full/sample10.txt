@@ -1,7 +1,10 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+CDC Reports Nearly 24% Decline in U.S. Drug Overdose Deaths
+Agency/source and visible attribution: Centers for Disease Control and Prevention (CDC), Office of Communications (OC)
+Original source: https://www.cdc.gov/media/releases/2025/2025-cdc-reports-decline-in-us-drug-overdose-deaths.html
+Reuse notice: This excerpt identifies CDC as the original source and links to the original. The original agency material is available free of charge. Use of this material does not imply endorsement by CDC, ATSDR, or the U.S. Department of Health and Human Services.
+
+New provisional data from CDC's National Vital Statistics System predict a nearly 24% decline in drug overdose deaths in the United States for the 12 months ending in September 2024, compared to the previous year. This is the most recent national data available and shows a continued steep decline in overdose deaths. Provisional data shows about 87,000 drug overdose deaths from October 2023 to September 2024, down from around 114,000 the previous year. This is the fewest overdose deaths in any 12-month period since June 2020.
+
+While this national decline is encouraging news, overdose remains the leading cause of death for Americans aged 18-44, highlighting the importance of sustained efforts to ensure this progress continues. President Trump first declared opioid overdose to be a public health emergency in 2017, a designation that remains in place, and the subsequent public health investments to CDC from Congress have transformed the nation's ability to use data to save lives. In the most recent data, 45 states showed declines in overdose deaths, but five states—Alaska, Montana, Nevada, South Dakota, and Utah—still saw increases in overdose deaths, highlighting the continued need for rapid local data and tailored response. In addition to the large provisional drop in fatal overdoses, we also see smaller decreases in nonfatal overdoses, as measured by emergency department visits for overdose, and welcome continued decreases in self-reported youth substance use.
+
+Multiple factors contribute to the drop in overdose deaths, including widespread, data-driven distribution of naloxone, which is a life-saving medication that can reverse an overdose; better access to evidence-based treatment for substance use disorders; shifts in the illegal drug supply; a resumption of prevention and response after pandemic-related disruptions; and continued investments in prevention and response programs like CDC's flagship Overdose Data to Action (OD2A) program.

@@ -1,7 +1,265 @@
 version: 1
-note: "Freeze baseline before feature commits; expand to 40+ URLs for B1"
+note: "Frozen Phase 1 B-layer corpus: 48 public articles, all published at least seven days before 2026-07-31; 13 hard/medium domains plus 3 easy controls."
 items:
-  - url: "https://www.example.com/"
-    domain: example.com
+  # hard domains
+  - url: "https://www.bloomberg.com/news/articles/2025-12-12/s-p-500-wavers-as-investors-rotate-out-of-technology-behemoths"
+    domain: bloomberg.com
+    tier: hard
+    published_at: "2025-12-12"
+    source: public-search
+    canary: true
+  - url: "https://www.bloomberg.com/news/articles/2025-12-10/tech-stock-hedges-a-waste-of-money-as-traders-bet-on-gains"
+    domain: bloomberg.com
+    tier: hard
+    published_at: "2025-12-10"
+    source: public-search
+  - url: "https://www.bloomberg.com/news/articles/2025-09-21/the-hottest-thing-in-the-stock-market-is-suddenly-boring-tech"
+    domain: bloomberg.com
+    tier: hard
+    published_at: "2025-09-21"
+    source: public-search
+
+  - url: "https://www.reuters.com/business/autos-transportation/south-koreas-hyundai-motor-flags-challenging-outlook-us-tariffs-weigh-q2-profit-2025-07-24/"
+    domain: reuters.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.reuters.com/technology/artificial-intelligence/openai-says-chatgpt-weekly-users-grow-700-million-2025-08-04/"
+    domain: reuters.com
+    tier: hard
+    published_at: "2025-08-04"
+    source: news-scraper-postgres
+  - url: "https://www.reuters.com/technology/artificial-intelligence/mistral-launches-new-ai-models-2025-07-24/"
+    domain: reuters.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.wsj.com/articles/amazon-microsoft-google-strengthen-grip-on-cloud-11657018980"
+    domain: wsj.com
+    tier: hard
+    published_at: "2022-07-05"
+    source: public-search
+  - url: "https://www.wsj.com/articles/techs-influence-over-markets-eclipses-dot-com-bubble-peak-11602894413"
+    domain: wsj.com
+    tier: hard
+    published_at: "2020-10-16"
+    source: public-search
+  - url: "https://www.wsj.com/articles/the-big-shift-driving-tech-profits-1519048800"
+    domain: wsj.com
+    tier: hard
+    published_at: "2018-02-19"
+    source: public-search
+    canary: true
+
+  - url: "https://www.ft.com/content/1ab9ba86-c4b4-42f1-b109-30f3104afbe5"
+    domain: ft.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.ft.com/content/4e44b7c5-87ca-4564-af49-dd2b5ad35227"
+    domain: ft.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.ft.com/content/5f4c428a-00d8-424b-8682-02698032a07d"
+    domain: ft.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.economist.com/leaders/2025/07/24/a-better-way-to-fight-trumps-attack-on-universities"
+    domain: economist.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.economist.com/leaders/2025/07/24/investors-could-learn-from-blackrocks-private-market-humbling"
+    domain: economist.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.economist.com/leaders/2025/07/24/america-and-china-should-go-back-to-the-future-on-technology"
+    domain: economist.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.nytimes.com/2025/07/24/world/asia/india-air-accident-report.html"
+    domain: nytimes.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.nytimes.com/2025/07/24/world/middleeast/gaza-war-israel-ceasefire-hamas.html"
+    domain: nytimes.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.nytimes.com/2025/07/24/us/politics/trump-epstein.html"
+    domain: nytimes.com
+    tier: hard
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.washingtonpost.com/technology/2025/07/20/microsoft-sharepoint-hack/"
+    domain: washingtonpost.com
+    tier: hard
+    published_at: "2025-07-20"
+    source: public-search
+  - url: "https://www.washingtonpost.com/technology/2025/07/08/ai-chatbots-google-search-myth-busting/"
+    domain: washingtonpost.com
+    tier: hard
+    published_at: "2025-07-08"
+    source: public-search
+  - url: "https://www.washingtonpost.com/technology/2025/07/01/ai-moratorium-defeat-senate-silicon-valley/"
+    domain: washingtonpost.com
+    tier: hard
+    published_at: "2025-07-01"
+    source: public-search
+
+  # medium domains
+  - url: "https://www.cnbc.com/2025/07/24/kraft-heinz-layoff-pepsico-coke-snacking.html"
+    domain: cnbc.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.cnbc.com/2025/07/24/ed-sheeran-school-curriculum-music-education.html"
+    domain: cnbc.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.cnbc.com/2025/07/24/donation-by-totalenergies-will-help-greece-tackle-future-wildfires.html"
+    domain: cnbc.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.marketwatch.com/story/tylenol-maker-kenvue-warns-lackluster-sales-will-continue-in-2025-5430e4ba"
+    domain: marketwatch.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.marketwatch.com/story/u-s-stocks-are-in-the-green-but-a-major-bank-warns-investors-not-to-get-too-comfortable-9c8605fb"
+    domain: marketwatch.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.marketwatch.com/story/how-record-breaking-temperatures-have-affected-wheat-crops-across-the-northern-hemisphere-95783d47"
+    domain: marketwatch.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+
+  - url: "https://www.barrons.com/articles/stock-market-trump-tech-bubble-bda738a8"
+    domain: barrons.com
+    tier: medium
+    published_at: "2025-07-18"
+    source: public-search
+  - url: "https://www.barrons.com/articles/ai-investment-google-trump-71186157"
+    domain: barrons.com
+    tier: medium
+    published_at: "2025-07-24"
+    source: public-search
+    canary: true
+  - url: "https://www.barrons.com/articles/mag-7-stocks-terrific-10-china-tech-aa2073fc"
+    domain: barrons.com
+    tier: medium
+    published_at: "2025-03-27"
+    source: public-search
+
+  - url: "https://venturebeat.com/ai/meta-launches-ai-coding-agent-for-enterprise-developers/"
+    domain: venturebeat.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://venturebeat.com/ai/openai-launches-chatgpt-agent-to-automate-complex-tasks/"
+    domain: venturebeat.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://venturebeat.com/ai/google-cloud-unveils-new-ai-agents-for-enterprise/"
+    domain: venturebeat.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+
+  - url: "https://www.fastcompany.com/91377028/the-7-best-new-movies-and-tv-shows-to-stream-this-weekend"
+    domain: fastcompany.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://www.fastcompany.com/91377299/will-klarna-plus-win-why-the-company-is-giving-up-on-credit-cards-to-copy-costcos-model"
+    domain: fastcompany.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://www.fastcompany.com/91376740/the-one-size-fits-all-ai-regulation-eu-game-changer"
+    domain: fastcompany.com
+    tier: medium
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+
+  - url: "https://asia.nikkei.com/Business/Markets/Nikkei-Markets/Asian-stocks-fall-ahead-of-key-US-jobs-data"
+    domain: asia.nikkei.com
+    tier: medium
+    published_at: "2019-07-05"
+    source: public-search
+  - url: "https://asia.nikkei.com/Business/Markets/Nikkei-Markets/Technology-stocks-lead-Asian-losses-for-week"
+    domain: asia.nikkei.com
+    tier: medium
+    published_at: "2018-10-02"
+    source: public-search
+  - url: "https://asia.nikkei.com/Business/Trends/Taiwan-s-chip-industry-consolidating-at-last"
+    domain: asia.nikkei.com
+    tier: medium
+    published_at: "2015-09-12"
+    source: public-search
+
+  # easy controls
+  - url: "https://techcrunch.com/2025/07/23/openai-launches-chatgpt-agent/"
+    domain: techcrunch.com
     tier: easy
-    note: "placeholder; replace with real news URLs for B-layer eval"
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://techcrunch.com/2025/07/23/google-cloud-launches-new-ai-agents/"
+    domain: techcrunch.com
+    tier: easy
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+  - url: "https://techcrunch.com/2025/07/23/meta-launches-ai-coding-agent/"
+    domain: techcrunch.com
+    tier: easy
+    published_at: "2025-07-23"
+    source: news-scraper-postgres
+
+  - url: "https://www.theregister.com/2025/07/24/tesla_q2_2025/"
+    domain: theregister.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.theregister.com/2025/07/24/grok_vs_copyright/"
+    domain: theregister.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.theregister.com/2025/07/24/malwarebytes_bluescreens_employee_pcs/"
+    domain: theregister.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+    canary: true
+
+  - url: "https://www.business-standard.com/companies/news/emkay-global-issues-clarification-on-receiving-notice-from-cbi-details-here-125072400741_1.html"
+    domain: business-standard.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.business-standard.com/companies/news/bangladesh-court-orders-closure-of-bharti-airtel-s-mobile-tower-unit-125072400753_1.html"
+    domain: business-standard.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres
+  - url: "https://www.business-standard.com/companies/news/ceo-talks-hiranandani-group-eyes-rs-15-000-cr-investment-in-data-centres-125072400810_1.html"
+    domain: business-standard.com
+    tier: easy
+    published_at: "2025-07-24"
+    source: news-scraper-postgres

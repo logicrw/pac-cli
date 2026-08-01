@@ -8,6 +8,7 @@ import httpx
 import trafilatura
 from markdownify import markdownify
 
+from .ssrf import assert_public_url
 from .strategy import UA_NORMAL, TIMEOUT
 
 
@@ -116,14 +117,31 @@ async def download_images(
     out_dir.mkdir(parents=True, exist_ok=True)
     own_client = client is None
     if own_client:
-        client = httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT)
+        client = httpx.AsyncClient(follow_redirects=False, timeout=TIMEOUT)
 
     saved: list[Path] = []
     try:
         for i, url in enumerate(image_urls[:max_images]):
             try:
-                resp = await client.get(url, headers={"User-Agent": UA_NORMAL})
-                if resp.status_code == 200 and len(resp.content) > 1024:
+                current_url = url
+                resp: httpx.Response | None = None
+                for redirect_count in range(6):
+                    assert_public_url(current_url)
+                    resp = await client.get(
+                        current_url,
+                        headers={"User-Agent": UA_NORMAL},
+                        follow_redirects=False,
+                    )
+                    if resp.status_code not in (301, 302, 303, 307, 308):
+                        break
+                    location = resp.headers.get("Location")
+                    if not location or redirect_count == 5:
+                        raise httpx.TooManyRedirects(
+                            "image redirect missing Location or exceeded limit",
+                            request=resp.request,
+                        )
+                    current_url = urljoin(current_url, location)
+                if resp is not None and resp.status_code == 200 and len(resp.content) > 1024:
                     fname = _image_filename(url, i)
                     path = out_dir / fname
                     path.write_bytes(resp.content)

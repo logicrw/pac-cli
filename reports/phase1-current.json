@@ -1,0 +1,1093 @@
+{
+  "meta": {
+    "generated_at": "2026-07-31T08:01:23+00:00",
+    "cmd": ".venv/bin/pac fetch --sites-js /tmp/pac-eval-rules/sites.js --out-dir /tmp/pac-eval-current-accepted2 --no-images --compact",
+    "total": 48,
+    "raw_ok_count": 5,
+    "raw_success_rate": 0.1042,
+    "ok_count": 5,
+    "success_rate": 0.1042,
+    "quality_checked_count": 5,
+    "elapsed_sec": 227.927,
+    "max_elapsed_sec": 30.885,
+    "easy_p50_sec": 1.787
+  },
+  "by_domain": {
+    "bloomberg.com": {
+      "total": 3,
+      "ok": 3,
+      "rate": 1.0
+    },
+    "reuters.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "wsj.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "ft.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "economist.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "nytimes.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "washingtonpost.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "cnbc.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "marketwatch.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "barrons.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "venturebeat.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "fastcompany.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "asia.nikkei.com": {
+      "total": 3,
+      "ok": 2,
+      "rate": 0.6667
+    },
+    "techcrunch.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "theregister.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    },
+    "business-standard.com": {
+      "total": 3,
+      "ok": 0,
+      "rate": 0.0
+    }
+  },
+  "items": [
+    {
+      "url": "https://www.bloomberg.com/news/articles/2025-12-12/s-p-500-wavers-as-investors-rotate-out-of-technology-behemoths",
+      "domain": "bloomberg.com",
+      "tier": "hard",
+      "canary": true,
+      "raw_ok": true,
+      "ok": true,
+      "quality_checked": true,
+      "quality_reason": "pass",
+      "error_code": "",
+      "failure_class": "none",
+      "strategy_hit": [
+        "http_headers"
+      ],
+      "elapsed_sec": 1.416,
+      "content_chars": 1534,
+      "exit_code": 0,
+      "error": ""
+    },
+    {
+      "url": "https://www.bloomberg.com/news/articles/2025-12-10/tech-stock-hedges-a-waste-of-money-as-traders-bet-on-gains",
+      "domain": "bloomberg.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": true,
+      "ok": true,
+      "quality_checked": true,
+      "quality_reason": "pass",
+      "error_code": "",
+      "failure_class": "none",
+      "strategy_hit": [
+        "http_headers"
+      ],
+      "elapsed_sec": 1.34,
+      "content_chars": 718,
+      "exit_code": 0,
+      "error": ""
+    },
+    {
+      "url": "https://www.bloomberg.com/news/articles/2025-09-21/the-hottest-thing-in-the-stock-market-is-suddenly-boring-tech",
+      "domain": "bloomberg.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": true,
+      "ok": true,
+      "quality_checked": true,
+      "quality_reason": "pass",
+      "error_code": "",
+      "failure_class": "none",
+      "strategy_hit": [
+        "http_headers"
+      ],
+      "elapsed_sec": 3.052,
+      "content_chars": 1176,
+      "exit_code": 0,
+      "error": ""
+    },
+    {
+      "url": "https://www.reuters.com/business/autos-transportation/south-koreas-hyundai-motor-flags-challenging-outlook-us-tariffs-weigh-q2-profit-2025-07-24/",
+      "domain": "reuters.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.908,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.reuters.com/technology/artificial-intelligence/openai-says-chatgpt-weekly-users-grow-700-million-2025-08-04/",
+      "domain": "reuters.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.816,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.reuters.com/technology/artificial-intelligence/mistral-launches-new-ai-models-2025-07-24/",
+      "domain": "reuters.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.694,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.wsj.com/articles/amazon-microsoft-google-strengthen-grip-on-cloud-11657018980",
+      "domain": "wsj.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.763,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.wsj.com/articles/techs-influence-over-markets-eclipses-dot-com-bubble-peak-11602894413",
+      "domain": "wsj.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.78,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.wsj.com/articles/the-big-shift-driving-tech-profits-1519048800",
+      "domain": "wsj.com",
+      "tier": "hard",
+      "canary": true,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.79,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.ft.com/content/1ab9ba86-c4b4-42f1-b109-30f3104afbe5",
+      "domain": "ft.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 13.219,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.ft.com/content/4e44b7c5-87ca-4564-af49-dd2b5ad35227",
+      "domain": "ft.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 13.084,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.ft.com/content/5f4c428a-00d8-424b-8682-02698032a07d",
+      "domain": "ft.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.012,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.economist.com/leaders/2025/07/24/a-better-way-to-fight-trumps-attack-on-universities",
+      "domain": "economist.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_ua_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 14.269,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.economist.com/leaders/2025/07/24/investors-could-learn-from-blackrocks-private-market-humbling",
+      "domain": "economist.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_ua_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 13.941,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.economist.com/leaders/2025/07/24/america-and-china-should-go-back-to-the-future-on-technology",
+      "domain": "economist.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_ua_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.788,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.nytimes.com/2025/07/24/world/asia/india-air-accident-report.html",
+      "domain": "nytimes.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_ua_custom",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.957,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.nytimes.com/2025/07/24/world/middleeast/gaza-war-israel-ceasefire-hamas.html",
+      "domain": "nytimes.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_ua_custom",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.821,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.nytimes.com/2025/07/24/us/politics/trump-epstein.html",
+      "domain": "nytimes.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_ua_custom",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.881,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.washingtonpost.com/technology/2025/07/20/microsoft-sharepoint-hack/",
+      "domain": "washingtonpost.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "NETWORK",
+      "failure_class": "network",
+      "strategy_hit": [
+        "http_ua_googlebot_error",
+        "browser_cleanup",
+        "browser_cleanup_fail"
+      ],
+      "elapsed_sec": 4.269,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.washingtonpost.com/technology/2025/07/08/ai-chatbots-google-search-myth-busting/",
+      "domain": "washingtonpost.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "NETWORK",
+      "failure_class": "network",
+      "strategy_hit": [
+        "http_ua_googlebot_error",
+        "browser_cleanup",
+        "browser_cleanup_fail"
+      ],
+      "elapsed_sec": 30.885,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.washingtonpost.com/technology/2025/07/01/ai-moratorium-defeat-senate-silicon-valley/",
+      "domain": "washingtonpost.com",
+      "tier": "hard",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "NETWORK",
+      "failure_class": "network",
+      "strategy_hit": [
+        "http_ua_googlebot_error",
+        "browser_cleanup",
+        "browser_cleanup_fail"
+      ],
+      "elapsed_sec": 4.288,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.cnbc.com/2025/07/24/kraft-heinz-layoff-pepsico-coke-snacking.html",
+      "domain": "cnbc.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 13.224,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.cnbc.com/2025/07/24/ed-sheeran-school-curriculum-music-education.html",
+      "domain": "cnbc.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 13.25,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.cnbc.com/2025/07/24/donation-by-totalenergies-will-help-greece-tackle-future-wildfires.html",
+      "domain": "cnbc.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.89,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.marketwatch.com/story/tylenol-maker-kenvue-warns-lackluster-sales-will-continue-in-2025-5430e4ba",
+      "domain": "marketwatch.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.34,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.marketwatch.com/story/u-s-stocks-are-in-the-green-but-a-major-bank-warns-investors-not-to-get-too-comfortable-9c8605fb",
+      "domain": "marketwatch.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.321,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.marketwatch.com/story/how-record-breaking-temperatures-have-affected-wheat-crops-across-the-northern-hemisphere-95783d47",
+      "domain": "marketwatch.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_referer_custom",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.325,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.barrons.com/articles/stock-market-trump-tech-bubble-bda738a8",
+      "domain": "barrons.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.513,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.barrons.com/articles/ai-investment-google-trump-71186157",
+      "domain": "barrons.com",
+      "tier": "medium",
+      "canary": true,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.776,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.barrons.com/articles/mag-7-stocks-terrific-10-china-tech-aa2073fc",
+      "domain": "barrons.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.737,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://venturebeat.com/ai/meta-launches-ai-coding-agent-for-enterprise-developers/",
+      "domain": "venturebeat.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 0.561,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://venturebeat.com/ai/openai-launches-chatgpt-agent-to-automate-complex-tasks/",
+      "domain": "venturebeat.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 0.651,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://venturebeat.com/ai/google-cloud-unveils-new-ai-agents-for-enterprise/",
+      "domain": "venturebeat.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 0.582,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.fastcompany.com/91377028/the-7-best-new-movies-and-tv-shows-to-stream-this-weekend",
+      "domain": "fastcompany.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.61,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.fastcompany.com/91377299/will-klarna-plus-win-why-the-company-is-giving-up-on-credit-cards-to-copy-costcos-model",
+      "domain": "fastcompany.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.618,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.fastcompany.com/91376740/the-one-size-fits-all-ai-regulation-eu-game-changer",
+      "domain": "fastcompany.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "BOT_CHALLENGE",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 12.067,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://asia.nikkei.com/Business/Markets/Nikkei-Markets/Asian-stocks-fall-ahead-of-key-US-jobs-data",
+      "domain": "asia.nikkei.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": true,
+      "ok": true,
+      "quality_checked": true,
+      "quality_reason": "pass",
+      "error_code": "",
+      "failure_class": "none",
+      "strategy_hit": [
+        "http_primary"
+      ],
+      "elapsed_sec": 1.623,
+      "content_chars": 950,
+      "exit_code": 0,
+      "error": ""
+    },
+    {
+      "url": "https://asia.nikkei.com/Business/Markets/Nikkei-Markets/Technology-stocks-lead-Asian-losses-for-week",
+      "domain": "asia.nikkei.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": true,
+      "ok": true,
+      "quality_checked": true,
+      "quality_reason": "pass",
+      "error_code": "",
+      "failure_class": "none",
+      "strategy_hit": [
+        "http_primary"
+      ],
+      "elapsed_sec": 1.728,
+      "content_chars": 768,
+      "exit_code": 0,
+      "error": ""
+    },
+    {
+      "url": "https://asia.nikkei.com/Business/Trends/Taiwan-s-chip-industry-consolidating-at-last",
+      "domain": "asia.nikkei.com",
+      "tier": "medium",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.722,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://techcrunch.com/2025/07/23/openai-launches-chatgpt-agent/",
+      "domain": "techcrunch.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.787,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://techcrunch.com/2025/07/23/google-cloud-launches-new-ai-agents/",
+      "domain": "techcrunch.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.4,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://techcrunch.com/2025/07/23/meta-launches-ai-coding-agent/",
+      "domain": "techcrunch.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 2.063,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.theregister.com/2025/07/24/tesla_q2_2025/",
+      "domain": "theregister.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.734,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.theregister.com/2025/07/24/grok_vs_copyright/",
+      "domain": "theregister.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.016,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.theregister.com/2025/07/24/malwarebytes_bluescreens_employee_pcs/",
+      "domain": "theregister.com",
+      "tier": "easy",
+      "canary": true,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "strategy",
+      "strategy_hit": [
+        "http_primary",
+        "http_googlebot_fallback"
+      ],
+      "elapsed_sec": 1.038,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.business-standard.com/companies/news/emkay-global-issues-clarification-on-receiving-notice-from-cbi-details-here-125072400741_1.html",
+      "domain": "business-standard.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.93,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.business-standard.com/companies/news/bangladesh-court-orders-closure-of-bharti-airtel-s-mobile-tower-unit-125072400753_1.html",
+      "domain": "business-standard.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.689,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    },
+    {
+      "url": "https://www.business-standard.com/companies/news/ceo-talks-hiranandani-group-eyes-rs-15-000-cr-investment-in-data-centres-125072400810_1.html",
+      "domain": "business-standard.com",
+      "tier": "easy",
+      "canary": false,
+      "raw_ok": false,
+      "ok": false,
+      "quality_checked": false,
+      "quality_reason": "",
+      "error_code": "HTTP_BLOCKED",
+      "failure_class": "bot",
+      "strategy_hit": [
+        "http_headers",
+        "http_googlebot_fallback",
+        "browser_cleanup"
+      ],
+      "elapsed_sec": 11.621,
+      "content_chars": 0,
+      "exit_code": 1,
+      "error": ""
+    }
+  ],
+  "compare": {
+    "baseline_generated_at": "2026-07-31T07:57:35+00:00",
+    "baseline_success_rate": 0.125,
+    "current_success_rate": 0.1042,
+    "success_rate_diff_pp": -2.08,
+    "domain_regressions": [],
+    "added_urls": [],
+    "removed_urls": []
+  }
+}

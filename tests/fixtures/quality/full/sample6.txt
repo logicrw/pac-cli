@@ -1,7 +1,7 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+SEC Announces Formation of Cross-Border Task Force to Combat Fraud
+Agency/source: U.S. Securities and Exchange Commission (SEC)
+Source: https://www.sec.gov/newsroom/press-releases/2025-113-sec-announces-formation-cross-border-task-force-combat-fraud
+
+The Securities and Exchange Commission today announced the formation of a task force that will strengthen and enhance the Division of Enforcement’s efforts to identify and combat cross-border fraud harming U.S. investors.
+
+The Cross-Border Task Force will focus initially on investigating potential U.S. federal securities law violations related to foreign-based companies, including potential market manipulation, such as “pump-and-dump" and "ramp-and-dump" schemes. The task force also will focus enforcement efforts on gatekeepers, particularly auditors and underwriters, which help these companies access the U.S. capital markets. In addition, it will examine potential securities law violations related to companies from foreign jurisdictions, such as China, where governmental control and other factors pose unique investor risks.

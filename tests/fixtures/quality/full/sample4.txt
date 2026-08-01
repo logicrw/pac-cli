@@ -1,7 +1,15 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+NIST Finalizes ‘Lightweight Cryptography’ Standard to Protect Small Devices
+Agency/source: National Institute of Standards and Technology (NIST)
+Source: https://www.nist.gov/news-events/news/2025/08/nist-finalizes-lightweight-cryptography-standard-protect-small-devices
+
+Many networked devices do not possess the electronic resources that larger computers do, but they still need protection from cyberattacks. NIST’s lightweight cryptography standard will help.
+
+The four algorithms in the standard require less computing power and time than more conventional cryptographic methods do, making them useful for securing data from resource-constrained devices such as those making up the Internet of Things.
+
+NIST has finalized the standard after a multiyear public review process followed by extensive interaction with the design community.
+
+It’s the little things that matter most, as the saying goes, and the National Institute of Standards and Technology (NIST) has got their back. NIST’s newly finalized lightweight cryptography standard provides a defense from cyberattacks for even the smallest of networked electronic devices.
+
+Released as Ascon-Based Lightweight Cryptography Standards for Constrained Devices (NIST Special Publication 800-232), the standard contains tools designed to protect information created and transmitted by the billions of devices that form the Internet of Things (IoT) as well as other small electronics, such as RFID tags and medical implants. Miniature technologies like these often possess far fewer computational resources than computers or smartphones do, but they still need protection from cyberattacks. The answer is lightweight cryptography, which is designed to defend these sorts of resource-constrained devices.
+
+In the standard are four variants from the Ascon family that give designers different options for different use cases. The variants focus on two of the main tasks of lightweight cryptography: authenticated encryption with associated data (AEAD) and hashing.

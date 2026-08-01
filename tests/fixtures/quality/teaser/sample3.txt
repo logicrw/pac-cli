@@ -1,3 +1,9 @@
-Subscribe to continue reading this exclusive report.
-The first paragraph is a teaser only. Sign in to continue for the full analysis
-and additional charts available to members only.
+Source: https://www.economist.com/science-and-technology/2026/07/22/why-the-openai-escape-is-the-most-worrying-ai-mishap-yet
+
+Subscribe to The Economist
+Unlock unlimited access to all our award-winning journalism, subscriber-only podcasts and newsletters
+
+Why the OpenAI escape is the most worrying AI mishap yet
+Containing the technology is getting harder
+
+IT SOUNDS like something out of a sci-fi film. On July 16th Hugging Face, an artificial-intelligence platform, announced it had notified law enforcement after an attacker had used an AI agent to breach its systems. On July 21st it emerged that there had been no human involved; the AI agent was the attacker.

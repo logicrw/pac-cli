@@ -4,8 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pac-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fetch paywalled news articles as markdown (CLI for agents)"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
@@ -18,10 +20,19 @@ dependencies = [
 
 [project.optional-dependencies]
 patchright = ["patchright>=1.0"]
+eval = ["PyYAML>=6.0"]
 
 [project.scripts]
 pac = "bpc_fetch.cli:main"
 bpc-fetch = "bpc_fetch.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/logicrw/pac-cli"
+Repository = "https://github.com/logicrw/pac-cli"
+Issues = "https://github.com/logicrw/pac-cli/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/bpc_fetch"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"data/sites.js" = "bpc_fetch/data/sites.js"

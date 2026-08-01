@@ -1,7 +1,17 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+NASA Says Mars Rover Discovered Potential Biosignature Last Year
+Agency/source: National Aeronautics and Space Administration (NASA)
+Source: https://www.nasa.gov/news-release/nasa-says-mars-rover-discovered-potential-biosignature-last-year/
+
+A sample collected by NASA’s Perseverance Mars rover from an ancient dry riverbed in Jezero Crater could preserve evidence of ancient microbial life. Taken from a rock named “Cheyava Falls” last year, the sample, called “Sapphire Canyon,” contains potential biosignatures, according to a paper published Wednesday in the journal Nature.
+
+A potential biosignature is a substance or structure that might have a biological origin but requires more data or further study before a conclusion can be reached about the absence or presence of life.
+
+Perseverance came upon Cheyava Falls in July 2024 while exploring the “Bright Angel” formation, a set of rocky outcrops on the northern and southern edges of Neretva Vallis, an ancient river valley measuring a quarter-mile (400 meters) wide that was carved by water rushing into Jezero Crater long ago.
+
+The rover’s science instruments found that the formation’s sedimentary rocks are composed of clay and silt, which, on Earth, are excellent preservers of past microbial life. They also are rich in organic carbon, sulfur, oxidized iron (rust), and phosphorous.
+
+First to collect data on this rock were Perseverance’s PIXL (Planetary Instrument for X-ray Lithochemistry) and SHERLOC (Scanning Habitable Environments with Raman & Luminescence for Organics & Chemicals) instruments. While investigating Cheyava Falls, an arrowhead-shaped rock measuring 3.2 feet by 2 feet (1 meter by 0.6 meters), they found what appeared to be colorful spots. The spots on the rock could have been left behind by microbial life if it had used the raw ingredients, the organic carbon, sulfur, and phosphorus, in the rock as an energy source.
+
+In higher-resolution images, the instruments found a distinct pattern of minerals arranged into reaction fronts (points of contact where chemical and physical reactions occur) the team called leopard spots. The spots carried the signature of two iron-rich minerals: vivianite (hydrated iron phosphate) and greigite (iron sulfide). Vivianite is frequently found on Earth in sediments, peat bogs, and around decaying organic matter. Similarly, certain forms of microbial life on Earth can produce greigite.
+
+The combination of these minerals, which appear to have formed by electron-transfer reactions between the sediment and organic matter, is a potential fingerprint for microbial life, which would use these reactions to produce energy for growth. The minerals also can be generated abiotically, or without the presence of life.

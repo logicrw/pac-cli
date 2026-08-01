@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import tempfile
 import zipfile
 from dataclasses import asdict
@@ -40,6 +39,35 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Replace path atomically using a temporary file beside the target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    _atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def _validated_sites_js(data: bytes) -> None:
+    text = data.decode("utf-8")
+    import re
+    candidate = re.sub(r"^var defaultSites\s*=\s*", "", text.strip())
+    candidate = re.sub(r";\s*$", "", candidate)
+    candidate = re.sub(r"^var grouped_sites\s*=\s*\{.*?\};\s*", "", candidate, flags=re.DOTALL)
+    entries = _extract_entries(candidate)
+    if not entries or not entries_to_domain_map(entries):
+        raise ValueError("invalid sites.js: no usable domains")
 
 
 def _load_base_entries(base_js: Path) -> dict[str, dict]:
@@ -87,8 +115,9 @@ def _install_base_from_zip(zip_path: Path) -> Path | None:
             return None
         name = candidates[0]
         target = sites_js_path()
-        with zf.open(name) as src, open(target, "wb") as dst:
-            shutil.copyfileobj(src, dst)
+        data = zf.read(name)
+        _validated_sites_js(data)
+        _atomic_write_bytes(target, data)
         return target
 
 
@@ -106,7 +135,14 @@ def sync_rules(
     # 1) base sites.js
     base = sites_js_path()
     if from_zip is not None:
-        installed = _install_base_from_zip(from_zip)
+        try:
+            installed = _install_base_from_zip(from_zip)
+        except Exception as e:
+            return {
+                "ok": False,
+                "error_code": "INTERNAL",
+                "error": f"invalid sites.js zip {from_zip}: {e}",
+            }
         if installed:
             base = installed
             sources.append(f"zip:{from_zip}")
@@ -119,8 +155,10 @@ def sync_rules(
     elif SITES_JS_URL and not offline:
         try:
             r = httpx.get(SITES_JS_URL, timeout=60.0, follow_redirects=True)
-            if r.status_code == 200 and "defaultSites" in r.text:
-                base.write_text(r.text, encoding="utf-8")
+            if r.status_code == 200:
+                data = r.content
+                _validated_sites_js(data)
+                _atomic_write_bytes(base, data)
                 sources.append(f"remote_js:{SITES_JS_URL}")
             else:
                 warnings.append("remote_sites_js_failed")
@@ -129,7 +167,9 @@ def sync_rules(
 
     if not base.exists():
         if SITES_JS_DEFAULT.exists():
-            shutil.copy2(SITES_JS_DEFAULT, base)
+            data = SITES_JS_DEFAULT.read_bytes()
+            _validated_sites_js(data)
+            _atomic_write_bytes(base, data)
             sources.append(f"bundled:{SITES_JS_DEFAULT}")
             warnings.append("using_bundled_base")
         else:
@@ -156,19 +196,27 @@ def sync_rules(
         try:
             r = httpx.get(url, timeout=60.0, follow_redirects=True)
             if r.status_code == 200:
-                updated = r.json()
-                sites_updated_path().write_text(
-                    json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-                sources.append(f"updated:{url}")
+                candidate = r.json()
+                if isinstance(candidate, dict):
+                    updated = candidate
+                    _atomic_write_text(
+                        sites_updated_path(), json.dumps(updated, ensure_ascii=False, indent=2)
+                    )
+                    sources.append(f"updated:{url}")
+                else:
+                    warnings.append("updated_invalid_shape")
             else:
                 warnings.append(f"updated_http_{r.status_code}")
         except Exception as e:
             warnings.append(f"updated_error:{e}")
     if updated is None and sites_updated_path().exists():
         try:
-            updated = json.loads(sites_updated_path().read_text(encoding="utf-8"))
-            sources.append(f"updated_cache:{sites_updated_path()}")
+            candidate = json.loads(sites_updated_path().read_text(encoding="utf-8"))
+            if isinstance(candidate, dict):
+                updated = candidate
+                sources.append(f"updated_cache:{sites_updated_path()}")
+            else:
+                warnings.append("updated_cache_corrupt")
         except Exception:
             warnings.append("updated_cache_corrupt")
 
@@ -177,8 +225,8 @@ def sync_rules(
     cache_data = {k: asdict(v) for k, v in domain_map.items()}
     raw = json.dumps(cache_data, ensure_ascii=False, sort_keys=True).encode("utf-8")
     content_hash = _sha256_bytes(raw)
-    cache_map_path().write_text(
-        json.dumps(cache_data, ensure_ascii=False, indent=2), encoding="utf-8"
+    _atomic_write_text(
+        cache_map_path(), json.dumps(cache_data, ensure_ascii=False, indent=2)
     )
 
     rule_version = f"{_now()}#sha256:{content_hash[:12]}"
@@ -195,7 +243,7 @@ def sync_rules(
         "using_bundled_base": "using_bundled_base" in warnings,
         "warnings": warnings,
     }
-    manifest_path().write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(manifest_path(), json.dumps(manifest, ensure_ascii=False, indent=2))
 
     return {
         "ok": True,

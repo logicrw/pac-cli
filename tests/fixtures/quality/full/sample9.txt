@@ -1,7 +1,9 @@
-This is a complete news article used as a quality-gate fixture.
-It contains enough prose to pass the minimum length threshold without any
-subscription or paywall teaser language in the opening section.
-Analysts said the market reacted calmly after the announcement, while
-officials emphasized that negotiations would continue through the week.
-Further paragraphs expand on economic context, international reactions,
-and historical comparisons so that the sample resembles a real story body.
+EPA Protects the Little Colorado River from Impacts of Abandoned Uranium Mines, Announces Removal Action to Advance Cleanup of Contamination
+Agency/source: U.S. Environmental Protection Agency (EPA)
+Source: https://www.epa.gov/newsreleases/epa-protects-little-colorado-river-impacts-abandoned-uranium-mines-announces-removal
+
+Today, U.S. Environmental Protection Agency (EPA) announced a removal action decision that will protect the Little Colorado River from uranium contamination by safely moving mine waste from two abandoned uranium mines and a portion of a third into an on-site repository one mile from the river.
+
+The Section 9 Lease Mine Site is located in Coconino County, Arizona, and is adjacent to the Little Colorado River in the Cameron Mining District near the Navajo Nation Indian Reservation. EPA coordinated closely with the State of Arizona’s Department of Environmental Quality to ensure the protection of public resources and the consideration of local stakeholder priorities.
+
+The removal design process is estimated to commence in 2026 and will safely remove and relocate waste to the repository, while protecting human health and the environment from ionizing radiation caused by historic mining activities. Once removal is complete, the former mine areas will be restored to natural conditions, protecting the river’s critical habitat and important cultural resources. The new repository may also serve as a regional repository for waste from other abandoned uranium mines in the Cameron Mining District, streamlining future cleanup efforts in the region.
