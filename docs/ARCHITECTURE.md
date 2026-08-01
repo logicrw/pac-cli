@@ -154,6 +154,7 @@ Agent: （按 Skill）pac fetch "<url>" --compact
 5. **先做对再做厚**：v1 先 HTTP 策略 + 基础浏览器 + 质量门 + 规则同步；更强反 bot 栈可增量。  
 6. **汲取现有项目，禁止重复造已经验证过的轮子**（见 §4）。  
 7. **可观测**：`strategy_hit`、`rule_version`、`error_code`、`latency_ms` 必须返回。
+8. **维护自动化保持无状态**：中央 GitHub Actions 每日检查并通过 PR 更新镜像；客户端只在首次使用且 TTL 过期时 lazy sync。禁止为此引入 daemon、数据库或绑定单一操作系统的调度器。
 
 ---
 

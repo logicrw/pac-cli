@@ -9,8 +9,10 @@ import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
+from ..ssrf import assert_public_url
 
 from ..sites import (
     SITES_JS_DEFAULT,
@@ -27,10 +29,64 @@ from .paths import (
 
 DEFAULT_UPDATED_URL = os.environ.get(
     "PAC_SITES_UPDATED_URL",
-    "https://gitflic.ru/project/magnolia1234/bpc_updates/blob/raw?file=sites_updated.json",
+    "https://raw.githubusercontent.com/logicrw/pac-cli/main/data/sites_updated.json",
 )
-# Full sites.js remote optional — often 404; empty = skip
-SITES_JS_URL = os.environ.get("PAC_SITES_JS_URL", "").strip()
+SITES_JS_URL = os.environ.get(
+    "PAC_SITES_JS_URL",
+    "https://raw.githubusercontent.com/logicrw/pac-cli/main/data/sites.js",
+).strip()
+MAX_SITES_JS_ZIP_BYTES = 5_000_000
+MAX_ZIP_MEMBERS = 1_000
+MAX_ZIP_COMPRESSION_RATIO = 200
+
+
+def download_bytes(url: str, *, client: httpx.Client | None = None, max_bytes: int = 10_000_000) -> bytes:
+    """Download bounded bytes with SSRF-safe, manually validated redirects."""
+    current = url
+    owns_client = client is None
+    active_client = client or httpx.Client(timeout=60.0, follow_redirects=False)
+    try:
+        for redirects in range(6):
+            assert_public_url(current)
+            with active_client.stream(
+                "GET", current, timeout=60.0, follow_redirects=False
+            ) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if not location:
+                        raise RuntimeError("redirect missing Location")
+                    if redirects == 5:
+                        raise RuntimeError("redirect limit exceeded")
+                    current = urljoin(current, location)
+                    continue
+                if response.status_code != 200:
+                    raise RuntimeError(f"HTTP {response.status_code}")
+
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        declared_size = int(content_length)
+                    except ValueError as exc:
+                        raise RuntimeError("invalid Content-Length") from exc
+                    if declared_size < 0:
+                        raise RuntimeError("invalid Content-Length")
+                    if declared_size > max_bytes:
+                        raise RuntimeError(
+                            f"response too large: {declared_size} > {max_bytes}"
+                        )
+
+                data = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(data) + len(chunk) > max_bytes:
+                        raise RuntimeError(
+                            f"response too large: more than {max_bytes} bytes"
+                        )
+                    data.extend(chunk)
+                return bytes(data)
+        raise RuntimeError("redirect limit exceeded")
+    finally:
+        if owns_client:
+            active_client.close()
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -39,6 +95,50 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def maybe_sync_rules(
+    sites_js: Path | None = None,
+    disabled: bool = False,
+    now: datetime | None = None,
+    ttl_seconds: int | None = None,
+) -> dict:
+    """Attempt one best-effort sync when the on-disk manifest is stale."""
+    empty = {"attempted": False, "reason": "", "warnings": []}
+    if disabled:
+        return {**empty, "reason": "disabled_cli"}
+    if os.environ.get("PAC_RULES_AUTO_SYNC", "").strip().lower() in ("0", "off", "false", "no"):
+        return {**empty, "reason": "disabled_env"}
+    if os.environ.get("PAC_RULES_PIN", "").strip():
+        return {**empty, "reason": "pinned"}
+    if sites_js is not None:
+        return {**empty, "reason": "explicit_sites_js"}
+
+    reason = "missing"
+    current = now or datetime.now(timezone.utc)
+    try:
+        ttl = ttl_seconds if ttl_seconds is not None else int(os.environ.get("PAC_RULES_TTL_SECONDS", "86400"))
+        path = manifest_path()
+        if path.exists():
+            reason = "corrupt"
+            try:
+                manifest = json.loads(path.read_text(encoding="utf-8"))
+                fetched_raw = manifest.get("fetched_at") if isinstance(manifest, dict) else None
+                if fetched_raw:
+                    fetched = datetime.fromisoformat(str(fetched_raw).replace("Z", "+00:00"))
+                    reason = "expired"
+                    age = (current - fetched).total_seconds()
+                    if 0 <= age < ttl:
+                        return {**empty, "reason": "fresh"}
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+        result = sync_rules()
+        warnings = list(result.get("warnings") or [])
+        if not result.get("ok", False):
+            warnings.append(f"rule_sync_failed:{result.get('error') or 'unknown'}")
+        return {"attempted": True, "reason": reason, "warnings": list(dict.fromkeys(warnings))}
+    except Exception as exc:
+        return {"attempted": True, "reason": reason, "warnings": [f"rule_sync_error:{exc}"]}
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -107,15 +207,26 @@ def _install_base_from_zip(zip_path: Path) -> Path | None:
     """Extract sites.js from BPC release zip into rules_root."""
     rules_root().mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zf:
-        candidates = [n for n in zf.namelist() if n.endswith("sites.js") or n == "sites.js"]
-        if not candidates:
-            # try nested
-            candidates = [n for n in zf.namelist() if n.endswith("/sites.js")]
+        members = zf.infolist()
+        if len(members) > MAX_ZIP_MEMBERS:
+            raise ValueError("ZIP contains too many members")
+        candidates = [info for info in members if Path(info.filename).name == "sites.js"]
         if not candidates:
             return None
-        name = candidates[0]
+        if len(candidates) != 1:
+            raise ValueError("ZIP must contain exactly one sites.js")
+        info = candidates[0]
+        if info.flag_bits & 0x1:
+            raise ValueError("encrypted sites.js is not supported")
+        if info.file_size > MAX_SITES_JS_ZIP_BYTES:
+            raise ValueError("sites.js exceeds the permitted size limit")
+        if info.file_size and (
+            info.compress_size == 0
+            or info.file_size > info.compress_size * MAX_ZIP_COMPRESSION_RATIO
+        ):
+            raise ValueError("sites.js has a suspicious compression ratio")
         target = sites_js_path()
-        data = zf.read(name)
+        data = zf.read(info)
         _validated_sites_js(data)
         _atomic_write_bytes(target, data)
         return target
@@ -128,6 +239,15 @@ def sync_rules(
     offline: bool = False,
 ) -> dict:
     """Run rules sync. Always leaves a usable cache when bundled base exists."""
+    if os.environ.get("PAC_RULES_PIN", "").strip():
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "pinned",
+            "warnings": [],
+            "sources": [],
+        }
+
     warnings: list[str] = []
     sources: list[str] = []
     rules_root().mkdir(parents=True, exist_ok=True)
@@ -154,14 +274,10 @@ def sync_rules(
             }
     elif SITES_JS_URL and not offline:
         try:
-            r = httpx.get(SITES_JS_URL, timeout=60.0, follow_redirects=True)
-            if r.status_code == 200:
-                data = r.content
-                _validated_sites_js(data)
-                _atomic_write_bytes(base, data)
-                sources.append(f"remote_js:{SITES_JS_URL}")
-            else:
-                warnings.append("remote_sites_js_failed")
+            data = download_bytes(SITES_JS_URL)
+            _validated_sites_js(data)
+            _atomic_write_bytes(base, data)
+            sources.append(f"remote_js:{SITES_JS_URL}")
         except Exception as e:
             warnings.append(f"remote_sites_js_error:{e}")
 
@@ -194,19 +310,16 @@ def sync_rules(
     url = updated_url or DEFAULT_UPDATED_URL
     if not offline and url:
         try:
-            r = httpx.get(url, timeout=60.0, follow_redirects=True)
-            if r.status_code == 200:
-                candidate = r.json()
-                if isinstance(candidate, dict):
-                    updated = candidate
-                    _atomic_write_text(
-                        sites_updated_path(), json.dumps(updated, ensure_ascii=False, indent=2)
-                    )
-                    sources.append(f"updated:{url}")
-                else:
-                    warnings.append("updated_invalid_shape")
+            data = download_bytes(url)
+            candidate = json.loads(data.decode("utf-8"))
+            if isinstance(candidate, dict):
+                updated = candidate
+                _atomic_write_text(
+                    sites_updated_path(), json.dumps(updated, ensure_ascii=False, indent=2)
+                )
+                sources.append(f"updated:{url}")
             else:
-                warnings.append(f"updated_http_{r.status_code}")
+                warnings.append("updated_invalid_shape")
         except Exception as e:
             warnings.append(f"updated_error:{e}")
     if updated is None and sites_updated_path().exists():

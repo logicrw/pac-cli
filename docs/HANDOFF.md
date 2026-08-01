@@ -42,8 +42,9 @@
 1. **Surge fake-ip**：本机所有域名 DNS 解析到 198.18.0.0/15。ssrf.py 已适配（hostname 全 fake-ip 时跳过本地 DNS 检查）。**不要把这段适配当 bug 修掉。**
 2. **macOS 无 `timeout` 命令**；需要时用 `gtimeout`（若装了 coreutils）或直接跑。
 3. **管道陷阱**：`pac fetch ... | head; echo $?` 的 `$?` 是 `head` 的状态。测 exit code 必须 `pac fetch ... > /tmp/x.json; echo $?`。
-4. **gitflic raw blob 端点全 404**（不止 sites.js，manifest.json 也 404）。规则源 = bundled `data/sites.js` + `sites_updated.json` 热修（可拉，仅 ~11 条，语义=按站名**整条替换**）。base 刷新走 `pac rules sync --from-zip <手工下载的 zip>`。
-5. `.venv` 已装好依赖；激活方式 `source .venv/bin/activate`。
+4. **历史说明（已被 0.2.2 维护路径取代）**：GitFlic project raw blob 端点不可靠；不要恢复手工 ZIP 流程。当前中央 workflow 使用已验证的 `bpc_uploads` master ZIP 与 `bpc_updates` shallow clone，客户端只同步 PAC GitHub 镜像。
+5. **GitHub 一次性设置**：在 `Settings > Actions > General` 开启 **Allow GitHub Actions to create and approve pull requests**，否则同步 workflow 会明确失败且不会直推 `main`。同时建议为 `main` 开启 required-PR branch protection；workflow 本身只开 PR，但当前仓库设置不会阻止其他写入者绕过该约定。
+6. `.venv` 已装好依赖；激活方式 `source .venv/bin/activate`。
 
 ## 4. 剩余任务（按序执行，验收前只做这些）
 
@@ -74,8 +75,8 @@ python scripts/run_eval.py --out /tmp/baseline.json   # 若 baseline 版无此�
 - `teaser/`：实网抓 ≥10 个付费墙预告页正文（WSJ/FT/Economist 等未绕过状态下的 HTML→文本）
 - 替换后保持 A4 双侧指标：full 误杀=0，teaser 拦截≥90%。**误杀只许调词表/窗口，不许删样本。**
 
-### T6 `--from-zip` 端到端（1h）
-浏览器打开 https://gitflic.ru/project/magnolia1234/bpc_uploads 手工下最新 zip → `pac rules sync --from-zip <path>` → `pac rules version` 确认 base 更新、stale 消失。
+### T6 `--from-zip` 端到端（历史验收项，已完成）
+该手工流程仅保留为恢复入口；常规维护已由中央 workflow + 客户端 lazy sync 取代。
 
 ### T7 交验
 按 `IMPLEMENTATION.md` §15.3 的 DoD 表逐项打勾，每项附证据（命令输出/文件路径），交回评审。

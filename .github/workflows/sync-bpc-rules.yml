@@ -1,0 +1,96 @@
+name: Sync BPC rules
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-bpc-rules
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  SYNC_BRANCH: automation/bpc-rules-sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install project and validation tools
+        run: python -m pip install -e . pytest PyYAML
+      - name: Fetch current updates snapshot
+        id: updates
+        run: |
+          git clone --depth 1 --no-tags --branch main https://gitflic.ru/project/magnolia1234/bpc_updates.git "$RUNNER_TEMP/bpc_updates"
+          commit="$(git -C "$RUNNER_TEMP/bpc_updates" rev-parse HEAD)"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Update central mirror
+        id: updater
+        run: |
+          set -o pipefail
+          python scripts/sync_upstream_rules.py \
+            --updates-file "$RUNNER_TEMP/bpc_updates/sites_updated.json" \
+            --updates-commit "${{ steps.updates.outputs.commit }}" \
+            --compact | tee "$RUNNER_TEMP/sync-result.json"
+          python - <<'PY'
+          import json, os
+          result = json.load(open(os.environ["RUNNER_TEMP"] + "/sync-result.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("changed=" + str(bool(result["changed"])).lower() + "\n")
+          print(json.dumps({k: v for k, v in result.items() if k != "error"}))
+          PY
+      - name: Audit deterministic upstream manifest
+        if: steps.updater.outputs.changed == 'true'
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path("data/upstream-manifest.json").read_text())
+          assert manifest["schema_version"] == 1
+          assert len(manifest["updates_source_commit"]) == 40
+          assert manifest["sites_js"]["sha256"] == hashlib.sha256(Path("data/sites.js").read_bytes()).hexdigest()
+          assert manifest["sites_updated_json"]["sha256"] == hashlib.sha256(Path("data/sites_updated.json").read_bytes()).hexdigest()
+          PY
+      - name: Audit rule coverage
+        if: steps.updater.outputs.changed == 'true'
+        run: python scripts/audit_rule_coverage.py
+      - name: Run full tests
+        if: steps.updater.outputs.changed == 'true'
+        run: env -u PYTHONPATH python -m pytest tests/ -q
+      - name: Check patch whitespace
+        if: steps.updater.outputs.changed == 'true'
+        run: git diff --check
+      - name: Create or update synchronization PR
+        if: steps.updater.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" || true
+          git checkout -B "$SYNC_BRANCH"
+          git add data/sites.js data/sites_updated.json data/upstream-manifest.json
+          git commit -m "chore(rules): sync BPC upstream mirror"
+          git push --force-with-lease origin "HEAD:$SYNC_BRANCH"
+          pr_number=$(gh pr list --head "$SYNC_BRANCH" --base main --state open --json number --jq '.[0].number')
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" --title "chore(rules): sync BPC upstream mirror" --body "Automated daily refresh of validated BPC rule snapshots."
+          else
+            gh pr create --base main --head "$SYNC_BRANCH" --title "chore(rules): sync BPC upstream mirror" --body "Automated daily refresh of validated BPC rule snapshots." || {
+              echo "::error::Unable to create the synchronization PR. In Settings > Actions > General, enable 'Allow GitHub Actions to create and approve pull requests', then rerun this workflow."
+              exit 1
+            }
+          fi

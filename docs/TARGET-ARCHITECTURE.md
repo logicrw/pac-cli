@@ -223,9 +223,14 @@ Skill/README 必须声明「开启后 URL 会发送给第三方服务」。
 | release zip 直链 | raw blob 端点整体 404 | 不做 URL 猜测；保留 `--from-zip` 人工通道 |
 | X `@Magnolia1234B` 发布通告 | 存在；调用方已有 x_retrieve 能力 | 基线版本 watcher 信号 |
 
-**推论：禁止把任何自动化建立在 gitflic HTML/API 上。** 后续若上游恢复 raw 端点或提供稳定 release URL，经 spike 验证后可升级为全自动。
+**推论：禁止把自动化建立在 GitFlic project HTML 或不稳定 raw blob 端点上。** 已验证的 `bpc_uploads` master ZIP 与公开 git shallow clone 可作为固定、可测试的数据源。
 
 ### 9.1 两层更新模型
+
+> **2026-08-01 实施注记**：0.2.2 的实际维护路径是“GitHub Actions
+> 每日检查并通过 PR 更新中央镜像 + 客户端 24 小时 TTL lazy sync”。它取代
+> 下文早期蓝图中的 systemd/launchd 与手工 ZIP 常规流程；canary 回滚历史仍是
+> 未来想法，不是当前维护范围。
 
 **Tier 1 — 热修（全自动，Phase 1 即具备）**
 

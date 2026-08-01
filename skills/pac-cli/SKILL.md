@@ -1,7 +1,7 @@
 ---
 name: pac-cli
 description: Use when fetching user-authorized news articles with PAC.
-version: 0.2.1
+version: 0.2.2
 author: pac-cli contributors
 license: MIT
 metadata:
@@ -32,6 +32,9 @@ PAC returns JSON; make decisions from `ok`, `error_code`, and `failure_class`.
    ```bash
    pac fetch "https://example.com/article" --compact
    ```
+   PAC performs at most one lazy rule check before this fetch when the local
+   manifest is older than 24 hours. Do not run `pac rules sync` before every
+   request. Use `--no-rule-sync` only for offline or reproducible runs.
    Add `--out-dir articles` to save full Markdown. Add `--images` only with
    `--out-dir` and only when the user requested images.
 4. Parse the JSON. Accept full content only when `ok` is true and
@@ -51,7 +54,8 @@ crawl.
   label that content as partial.
 - Never provide cookies, session tokens, credentials, or other secrets to PAC.
 - Monitoring, scheduling, URL discovery, and crawl state remain the calling
-  scraper's responsibility; PAC fetches supplied URLs.
+  scraper's responsibility; PAC fetches supplied URLs. The repository's daily
+  workflow maintains the central rule mirror separately.
 - Follow [compliance.md](references/compliance.md).
 
 ## Verification Checklist

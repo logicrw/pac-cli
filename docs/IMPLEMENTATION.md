@@ -815,7 +815,7 @@ SITES_JS_URL = os.environ.get("PAC_SITES_JS_URL", "")  # 空 = 跳过远程全�
 # 热修：已验证可拉取
 SITES_UPDATED_URL = os.environ.get(
     "PAC_SITES_UPDATED_URL",
-    "https://gitflic.ru/project/magnolia1234/bpc_updates/blob/raw?file=sites_updated.json",
+    "https://raw.githubusercontent.com/logicrw/pac-cli/main/data/sites_updated.json",
 )
 ```
 

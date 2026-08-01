@@ -1,7 +1,13 @@
 import asyncio
 from types import SimpleNamespace
+import pytest
 
 from bpc_fetch import cli
+
+
+@pytest.fixture(autouse=True)
+def _disable_real_lazy_sync(monkeypatch):
+    monkeypatch.setenv("PAC_RULES_AUTO_SYNC", "off")
 
 
 def _fetch_args(tmp_path, *, full=False, images=False):
@@ -222,6 +228,63 @@ def test_fetch_image_flags_share_one_default_false_destination(monkeypatch, caps
     capsys.readouterr()
     assert [args.images for args in parsed] == [False, True, False]
     assert all(not hasattr(args, "no_images") for args in parsed)
+
+
+def test_fetch_lazy_sync_runs_once_before_sites_load_and_merges_unique_warnings(monkeypatch):
+    events = []
+    async def fake_fetch_article(*args, **kwargs):
+        return {"ok": True, "title": "x", "markdown": "body", "warnings": ["same"]}
+    monkeypatch.setattr("bpc_fetch.strategy.fetch_article", fake_fetch_article)
+    monkeypatch.setattr(
+        "bpc_fetch.rules.sync.maybe_sync_rules",
+        lambda **kwargs: events.append(("sync", kwargs)) or {"warnings": ["same", "sync_failed"]},
+    )
+    monkeypatch.setattr(
+        "bpc_fetch.rules.store.get_sites_map_with_version",
+        lambda sites_js: events.append(("load", sites_js)) or ({}, "v", ["store"]),
+    )
+
+    result = asyncio.run(cli._cmd_fetch(_fetch_args(None)))
+
+    assert [event[0] for event in events] == ["sync", "load"]
+    assert result["warnings"] == ["same", "sync_failed", "store", "rule_missing"]
+
+
+def test_batch_no_rule_sync_is_forwarded_once(monkeypatch):
+    calls = []
+    async def fake_fetch_article(*args, **kwargs):
+        return {"ok": True, "markdown": "body"}
+    monkeypatch.setattr("bpc_fetch.strategy.fetch_article", fake_fetch_article)
+    monkeypatch.setattr(
+        "bpc_fetch.rules.sync.maybe_sync_rules",
+        lambda **kwargs: calls.append(kwargs) or {"warnings": []},
+    )
+    monkeypatch.setattr(
+        "bpc_fetch.rules.store.get_sites_map_with_version",
+        lambda sites_js: ({}, "v", []),
+    )
+    args = SimpleNamespace(urls=["https://example.com/a"], file=None, out_dir=None,
+                           concurrency=1, max=10, allow_partial=False, full=False,
+                           sites_js=None, no_rule_sync=True)
+
+    result = asyncio.run(cli._cmd_batch(args))
+
+    assert result["ok"] is True
+    assert calls == [{"sites_js": None, "disabled": True}]
+
+
+def test_fetch_and_batch_parse_no_rule_sync(monkeypatch, capsys):
+    parsed = []
+    async def fake_dispatch(args):
+        parsed.append(args)
+        return {"ok": True}
+    monkeypatch.setattr(cli, "_dispatch", fake_dispatch)
+    for argv in (["pac", "fetch", "https://example.com/a", "--no-rule-sync"],
+                 ["pac", "batch", "https://example.com/a", "--no-rule-sync"]):
+        monkeypatch.setattr("sys.argv", argv)
+        cli.main()
+    capsys.readouterr()
+    assert [args.no_rule_sync for args in parsed] == [True, True]
 
 
 def test_doctor_uses_browser_launch_probe_result(monkeypatch):

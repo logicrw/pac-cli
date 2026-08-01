@@ -1,0 +1,65 @@
+{
+  "Der Spiegel": {
+    "allow_cookies": 1,
+    "block_regex": "\\.spiegel\\.de\\/public\\/shared\\/generated\\/js\\/commons\\..+\\.js",
+    "cs_dompurify": 1,
+    "domain": "spiegel.de",
+    "upd_version": "4.4.1.1"
+  },
+  "Dnevnik.bg (bot disabled)": {
+    "allow_cookies": 1,
+    "domain": "dnevnik.bg",
+    "upd_version": "4.4.0.3"
+  },
+  "Groupe Rossel": {
+    "allow_cookies": 1,
+    "block_regex": "\\.qiota\\.com",
+    "cs_dompurify": 1,
+    "cs_param": {
+      "article_sel": "article.r-article > r-article--section, div.r-content, div.qiota_reserve",
+      "paywall_sel": "r-panel.r-panel--paywall, r-panel.r-paywall--header"
+    },
+    "domain": "###_fr_be_groupe_rossel",
+    "group": [
+      "aisnenouvelle.fr",
+      "courrier-picard.fr",
+      "lardennais.fr",
+      "lavoixdunord.fr",
+      "lemessager.fr",
+      "lesoir.be",
+      "lest-eclair.fr",
+      "liberation-champagne.fr",
+      "lunion.fr",
+      "nordlittoral.fr",
+      "paris-normandie.fr",
+      "sudinfo.be"
+    ],
+    "upd_version": "4.4.1.3"
+  },
+  "Newsday": {
+    "allow_cookies": 1,
+    "block_regex": "\\.newsday\\.com\\/nd-user\\/nd_user_ace\\.bundle\\.js",
+    "cs_code": "[{\"cond\":\"html[class]\", \"rm_attrib\":\"class\"}]",
+    "domain": "newsday.com",
+    "upd_version2": "4.4.1.4"
+  },
+  "Observador.pt": {
+    "allow_cookies": 1,
+    "block_regex": "\\/observador\\.pt\\/wp-content\\/.+\\/paywall-compact-new\\.min\\.js",
+    "domain": "observador.pt",
+    "upd_version": "4.4.0.4"
+  },
+  "Spektrum.de": {
+    "allow_cookies": 1,
+    "block_regex": "\\.poool\\.fr",
+    "domain": "spektrum.de",
+    "upd_version": "4.4.0.6"
+  },
+  "Valeurs Actuelles": {
+    "allow_cookies": 1,
+    "block_regex": "\\.qiota\\.com",
+    "domain": "valeursactuelles.com",
+    "ld_json": "div.va-paywall|div.post__content",
+    "upd_version": "4.4.0.5"
+  }
+}

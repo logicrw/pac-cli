@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pac-cli"
-version = "0.2.1"
+version = "0.2.2"
 description = "Fetch paywalled news articles as markdown (CLI for agents)"
 readme = "README.md"
 license = { file = "LICENSE" }

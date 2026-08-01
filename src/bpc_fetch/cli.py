@@ -48,6 +48,7 @@ def main():
     p_fetch.add_argument("--archive", action="store_true", help="Force archive steps earlier")
     p_fetch.add_argument("--use-browser", action="store_true", default=None)
     p_fetch.add_argument("--no-browser", action="store_true")
+    p_fetch.add_argument("--no-rule-sync", action="store_true", help="Skip lazy rule sync")
 
     p_batch = sub.add_parser("batch", help="Batch fetch (default summary only)", parents=[_common])
     p_batch.add_argument("urls", nargs="*", help="URLs")
@@ -57,6 +58,7 @@ def main():
     p_batch.add_argument("--max", type=int, default=10, help="Default cap 10, hard 25")
     p_batch.add_argument("--allow-partial", action="store_true")
     p_batch.add_argument("--full", action="store_true")
+    p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip lazy rule sync")
 
     sub.add_parser("install-browser", help="Install Playwright Chromium", parents=[_common])
 
@@ -201,10 +203,16 @@ def _cmd_sites(args) -> dict:
 async def _cmd_fetch(args) -> dict:
     from .extract import download_images
     from .rules.store import get_sites_map_with_version
+    from .rules.sync import maybe_sync_rules
     from .strategy import fetch_article
 
     t0 = time.perf_counter()
-    sites, ver, warnings = get_sites_map_with_version(args.sites_js)
+    sites_js = getattr(args, "sites_js", None)
+    sync_result = maybe_sync_rules(
+        sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
+    )
+    sites, ver, warnings = get_sites_map_with_version(sites_js)
+    warnings = list(sync_result.get("warnings") or []) + list(warnings)
     domain = domain_from_url(args.url)
     strategy = sites.get(domain)
     if strategy is None:
@@ -227,7 +235,7 @@ async def _cmd_fetch(args) -> dict:
         domain=domain,
     )
     image_urls = result.pop("_image_urls", [])
-    result["warnings"] = list(result.get("warnings") or []) + list(warnings)
+    result["warnings"] = list(dict.fromkeys(list(result.get("warnings") or []) + list(warnings)))
     result["latency_ms"] = int((time.perf_counter() - t0) * 1000)
 
     if result.get("ok"):
@@ -259,6 +267,7 @@ async def _cmd_batch(args) -> dict:
     import os
 
     from .rules.store import get_sites_map_with_version
+    from .rules.sync import maybe_sync_rules
     from .strategy import fetch_article
 
     urls = list(args.urls or [])
@@ -287,7 +296,12 @@ async def _cmd_batch(args) -> dict:
             "strategy_hit": [],
         }
 
-    sites, ver, warnings = get_sites_map_with_version(args.sites_js)
+    sites_js = getattr(args, "sites_js", None)
+    sync_result = maybe_sync_rules(
+        sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
+    )
+    sites, ver, warnings = get_sites_map_with_version(sites_js)
+    warnings = list(dict.fromkeys(list(sync_result.get("warnings") or []) + list(warnings)))
     sem = aio.Semaphore(args.concurrency or 2)
     results = []
 

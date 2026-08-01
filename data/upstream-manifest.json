@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "upstream_extension_version": "4.4.1.4",
+  "updates_source_commit": "2b7e40df25c6928702d68ef755dfb93659846c81",
+  "sites_js": {
+    "sha256": "1f3bd4a8f8825684c1f0d8ac89363b66b71ea32713afeb0be4025d5706a2e9e6",
+    "domain_count": 927
+  },
+  "sites_updated_json": {
+    "sha256": "511f09f2783a7238973d3d74afaae3c5856fb0a25099b30ee55c86b3c9c8c80f",
+    "entry_count": 7
+  },
+  "sanitation": {
+    "marker": "x-access-token",
+    "removed_count": 1
+  }
+}
