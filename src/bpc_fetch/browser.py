@@ -28,6 +28,16 @@ from playwright.async_api import (
     async_playwright,
 )
 
+try:
+    from camoufox.async_api import AsyncCamoufox
+except ImportError:  # optional native anti-detect driver
+    AsyncCamoufox = None  # type: ignore[assignment,misc]
+
+try:
+    from camoufox.async_api import AsyncNewContext as CamoufoxAsyncNewContext
+except ImportError:  # stable camoufox releases may not expose this helper
+    CamoufoxAsyncNewContext = None  # type: ignore[assignment,misc]
+
 from .quality import classify_access_control_page
 from .sites import SiteStrategy
 
@@ -41,6 +51,7 @@ DEFAULT_CONTEXT_IDLE_SECONDS = max(
 DEFAULT_DOMAIN_CONCURRENCY = max(1, int(os.environ.get("PAC_DOMAIN_CONCURRENCY", "2")))
 DEFAULT_DOMAIN_RATE = max(0.01, float(os.environ.get("PAC_DOMAIN_RATE_PER_SECOND", "1.0")))
 DEFAULT_DOMAIN_BURST = max(1.0, float(os.environ.get("PAC_DOMAIN_BURST", "2")))
+DEFAULT_BROWSER_DRIVER = os.environ.get("PAC_BROWSER_DRIVER", "auto").strip().casefold() or "auto"
 
 _TRACKING_DOMAIN_SUFFIXES = (
     "doubleclick.net",
@@ -421,6 +432,10 @@ class _ContextKey:
     viewport_width: int
     viewport_height: int
     allow_cookies: bool
+    explicit_user_agent: bool
+    explicit_locale: bool
+    explicit_timezone: bool
+    explicit_viewport: bool
 
 
 @dataclass
@@ -718,6 +733,30 @@ def _build_stealth_script(
     return "(() => {\nconst cfg = " + json.dumps(config, ensure_ascii=False) + ";\n" + _STEALTH_SCRIPT_BODY + "\n})();"
 
 
+def _browser_driver_preference() -> str:
+    value = os.environ.get("PAC_BROWSER_DRIVER", DEFAULT_BROWSER_DRIVER).strip().casefold() or "auto"
+    aliases = {
+        "chrome": "playwright",
+        "chromium": "playwright",
+        "pw": "playwright",
+        "fox": "camoufox",
+    }
+    value = aliases.get(value, value)
+    if value not in {"auto", "camoufox", "playwright", "patchright"}:
+        return "auto"
+    return value
+
+
+def _camoufox_headless_value() -> bool | str:
+    headless = _truthy_env("PAC_BROWSER_HEADLESS", True)
+    if not headless:
+        return False
+    virtual = os.environ.get("PAC_CAMOUFOX_VIRTUAL_DISPLAY", "").strip().casefold()
+    if virtual in {"1", "true", "yes", "on", "virtual"}:
+        return "virtual"
+    return True
+
+
 async def ensure_browser() -> dict[str, Any]:
     """Check whether Playwright Chromium can be launched."""
 
@@ -751,6 +790,8 @@ class BrowserPool:
     ) -> None:
         self._pw: Any | None = None
         self._browser: Browser | Any | None = None
+        self._camoufox_manager: Any | None = None
+        self._driver_warning = ""
         self._max = max(1, int(max_contexts))
         self._idle_seconds = max(0.0, float(context_idle_seconds))
         self._sem = asyncio.Semaphore(self._max)
@@ -771,42 +812,100 @@ class BrowserPool:
             if self._started:
                 return
             self._stopping = False
+            self._driver_warning = ""
+            requested_driver = _browser_driver_preference()
+
+            if requested_driver in {"auto", "camoufox"} and AsyncCamoufox is not None:
+                try:
+                    await self._start_camoufox()
+                    self._started = True
+                    return
+                except Exception as exc:
+                    self._driver_warning = f"camoufox_fallback:{exc}"
+                    await self._cleanup_camoufox_manager()
+                    self._browser = None
+                    if requested_driver == "camoufox":
+                        # Explicit Camoufox still fails open to Playwright.  This
+                        # keeps the optional dependency from becoming a hard
+                        # runtime requirement when its browser binary is absent.
+                        pass
+
+            await self._start_playwright(requested_driver)
+            self._started = True
+
+    async def _start_camoufox(self) -> None:
+        if AsyncCamoufox is None:
+            raise RuntimeError("camoufox is not installed")
+        launch_options: dict[str, Any] = {
+            "headless": _camoufox_headless_value(),
+            # Required because PAC's browser cleanup intentionally modifies the
+            # live document after navigation. Read-only DOM extraction still
+            # runs through Playwright's isolated world.
+            "main_world_eval": True,
+        }
+        manager = AsyncCamoufox(**launch_options)
+        self._camoufox_manager = manager
+        try:
+            self._browser = await manager.__aenter__()
+        except Exception:
+            raise
+        self._pw = None
+        self._engine = "camoufox"
+
+    async def _start_playwright(self, requested_driver: str) -> None:
+        if requested_driver == "patchright":
             try:
                 from patchright.async_api import async_playwright as patchright_async_playwright
 
                 self._engine = "patchright"
                 self._pw = await patchright_async_playwright().start()
-            except Exception:
+            except Exception as exc:
+                if self._driver_warning:
+                    self._driver_warning += f";patchright_fallback:{exc}"
+                else:
+                    self._driver_warning = f"patchright_fallback:{exc}"
                 self._engine = "playwright"
                 self._pw = await async_playwright().start()
+        else:
+            self._engine = "playwright"
+            self._pw = await async_playwright().start()
 
-            headless = _truthy_env("PAC_BROWSER_HEADLESS", True)
-            launch_args = list(_LAUNCH_ARGS)
-            if _truthy_env("PAC_BROWSER_NO_SANDBOX", False):
-                launch_args.extend(("--no-sandbox", "--disable-setuid-sandbox"))
-            executable_path = os.environ.get("PAC_BROWSER_EXECUTABLE_PATH", "").strip() or None
-            launch_options: dict[str, Any] = {
-                "headless": headless,
-                "args": launch_args,
-            }
-            if executable_path:
-                launch_options["executable_path"] = executable_path
+        headless = _truthy_env("PAC_BROWSER_HEADLESS", True)
+        launch_args = list(_LAUNCH_ARGS)
+        if _truthy_env("PAC_BROWSER_NO_SANDBOX", False):
+            launch_args.extend(("--no-sandbox", "--disable-setuid-sandbox"))
+        executable_path = os.environ.get("PAC_BROWSER_EXECUTABLE_PATH", "").strip() or None
+        launch_options: dict[str, Any] = {
+            "headless": headless,
+            "args": launch_args,
+        }
+        if executable_path:
+            launch_options["executable_path"] = executable_path
+        try:
+            self._browser = await self._pw.chromium.launch(**launch_options)
+        except Exception:
             try:
-                self._browser = await self._pw.chromium.launch(**launch_options)
-            except Exception:
-                try:
-                    await self._pw.stop()
-                finally:
-                    self._pw = None
-                raise
-            self._started = True
+                await self._pw.stop()
+            finally:
+                self._pw = None
+            raise
+
+    async def _cleanup_camoufox_manager(self) -> None:
+        manager = self._camoufox_manager
+        self._camoufox_manager = None
+        if manager is None:
+            return
+        try:
+            await manager.__aexit__(None, None, None)
+        except Exception:
+            return
 
     async def stop(self) -> None:
         async with self._start_lock:
-            if not self._started and self._pw is None:
+            if not self._started and self._pw is None and self._camoufox_manager is None:
                 return
             self._stopping = True
-            idle_contexts: list[BrowserContext] = []
+            idle_contexts: list[BrowserContext | Any] = []
             async with self._lock:
                 idle_contexts = [entry.context for entry in self._idle_lru.values()]
                 self._idle_lru.clear()
@@ -817,16 +916,21 @@ class BrowserPool:
                     await context.close()
                 except Exception:
                     continue
-            if self._browser is not None:
-                try:
-                    await self._browser.close()
-                except Exception:
-                    self._browser = None
-            if self._pw is not None:
-                try:
-                    await self._pw.stop()
-                except Exception:
-                    self._pw = None
+
+            if self._camoufox_manager is not None:
+                await self._cleanup_camoufox_manager()
+            else:
+                if self._browser is not None:
+                    try:
+                        await self._browser.close()
+                    except Exception:
+                        pass
+                if self._pw is not None:
+                    try:
+                        await self._pw.stop()
+                    except Exception:
+                        pass
+
             self._browser = None
             self._pw = None
             self._started = False
@@ -842,22 +946,33 @@ class BrowserPool:
 
         headers = build_headers(strategy) if strategy else {}
         user_agent = headers.pop("User-Agent", None) or UA_NORMAL
-        locale = os.environ.get("PAC_BROWSER_LOCALE", "en-US").strip() or "en-US"
-        timezone_id = os.environ.get("PAC_BROWSER_TIMEZONE", "America/New_York").strip() or "America/New_York"
-        viewport_width = max(800, int(os.environ.get("PAC_BROWSER_VIEWPORT_WIDTH", "1365")))
-        viewport_height = max(600, int(os.environ.get("PAC_BROWSER_VIEWPORT_HEIGHT", "768")))
+        locale_raw = os.environ.get("PAC_BROWSER_LOCALE")
+        timezone_raw = os.environ.get("PAC_BROWSER_TIMEZONE")
+        viewport_width_raw = os.environ.get("PAC_BROWSER_VIEWPORT_WIDTH")
+        viewport_height_raw = os.environ.get("PAC_BROWSER_VIEWPORT_HEIGHT")
+        locale = (locale_raw or "en-US").strip() or "en-US"
+        timezone_id = (timezone_raw or "America/New_York").strip() or "America/New_York"
+        viewport_width = max(800, int(viewport_width_raw or "1365"))
+        viewport_height = max(600, int(viewport_height_raw or "768"))
         proxy = resolve_proxy(url, strategy)
         allow_cookies = bool(strategy and strategy.allow_cookies)
+        explicit_user_agent = bool(
+            strategy and (strategy.useragent or strategy.useragent_custom)
+        )
         key = _ContextKey(
             domain=domain.casefold().rstrip("."),
             user_agent=user_agent,
-            headers=tuple(sorted((str(key), str(value)) for key, value in headers.items())),
+            headers=tuple(sorted((str(header_name), str(value)) for header_name, value in headers.items())),
             proxy=proxy.cache_key() if proxy else None,
             locale=locale,
             timezone_id=timezone_id,
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             allow_cookies=allow_cookies,
+            explicit_user_agent=explicit_user_agent,
+            explicit_locale=locale_raw is not None,
+            explicit_timezone=timezone_raw is not None,
+            explicit_viewport=viewport_width_raw is not None or viewport_height_raw is not None,
         )
         return key, headers, proxy
 
@@ -898,6 +1013,19 @@ class BrowserPool:
     ) -> BrowserContext:
         if self._browser is None:
             raise RuntimeError("browser pool is not started")
+
+        if self._engine == "camoufox":
+            return await self._new_camoufox_context(key, headers, proxy)
+        return await self._new_playwright_context(key, headers, proxy)
+
+    async def _new_playwright_context(
+        self,
+        key: _ContextKey,
+        headers: Mapping[str, str],
+        proxy: ProxySettings | None,
+    ) -> BrowserContext:
+        if self._browser is None:
+            raise RuntimeError("browser pool is not started")
         options: dict[str, Any] = {
             "user_agent": key.user_agent,
             "locale": key.locale,
@@ -921,6 +1049,59 @@ class BrowserPool:
             proxy=proxy,
         )
         await context.add_init_script(script=script)
+        return context
+
+    async def _new_camoufox_context(
+        self,
+        key: _ContextKey,
+        headers: Mapping[str, str],
+        proxy: ProxySettings | None,
+    ) -> BrowserContext:
+        if self._browser is None:
+            raise RuntimeError("Camoufox browser pool is not started")
+
+        # Let Camoufox own fingerprint fields by default.  PAC overrides are
+        # applied only when the caller/rule explicitly asks for them, avoiding
+        # a Chromium-looking JS fingerprint layered over a Firefox-derived
+        # native engine.
+        options: dict[str, Any] = {
+            "extra_http_headers": dict(headers) or None,
+            "ignore_https_errors": _truthy_env("PAC_BROWSER_IGNORE_HTTPS_ERRORS", False),
+            "accept_downloads": False,
+        }
+        if key.explicit_user_agent:
+            options["user_agent"] = key.user_agent
+        if key.explicit_locale:
+            options["locale"] = key.locale
+        if key.explicit_timezone:
+            options["timezone_id"] = key.timezone_id
+        if key.explicit_viewport:
+            options["viewport"] = {
+                "width": key.viewport_width,
+                "height": key.viewport_height,
+            }
+            options["screen"] = {
+                "width": key.viewport_width,
+                "height": key.viewport_height,
+            }
+
+        proxy_value = proxy.as_playwright() if proxy is not None else None
+        if CamoufoxAsyncNewContext is not None:
+            try:
+                context = await CamoufoxAsyncNewContext(
+                    self._browser,
+                    proxy=proxy_value,
+                    **options,
+                )
+                return context
+            except TypeError:
+                # Compatibility with stable Camoufox releases that do not yet
+                # expose the newer per-context helper signature.
+                pass
+
+        if proxy_value is not None:
+            options["proxy"] = proxy_value
+        context = await self._browser.new_context(**options)
         return context
 
     async def _acquire_context(
@@ -1055,6 +1236,7 @@ class BrowserPool:
                 "max_contexts": self._max,
                 "total_contexts": self._total_contexts,
                 "idle_contexts": len(self._idle_lru),
+                "driver_warning": self._driver_warning,
             }
 
     async def __aenter__(self) -> "BrowserPool":
@@ -1063,6 +1245,9 @@ class BrowserPool:
 
     async def __aexit__(self, *_: Any) -> None:
         await self.stop()
+
+
+BrowserContextPool = BrowserPool
 
 
 _SHARED_POOLS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, BrowserPool]" = (
@@ -1227,6 +1412,23 @@ async def _handle_resource_route(
         return
 
 
+async def _evaluate_page_script(
+    page: Page,
+    script: str,
+    *,
+    engine: str,
+    modifies_dom: bool,
+) -> Any:
+    """Evaluate a script with Camoufox main-world semantics when required."""
+
+    if engine == "camoufox" and modifies_dom:
+        source = script.strip()
+        if source.startswith("() =>") or source.startswith("function"):
+            source = f"({source})()"
+        return await page.evaluate("mw:" + source)
+    return await page.evaluate(script)
+
+
 def _navigation_error_code(error: BaseException) -> str:
     message = str(error).casefold()
     browser_unavailable_markers = (
@@ -1235,6 +1437,9 @@ def _navigation_error_code(error: BaseException) -> str:
         "failed to launch",
         "playwright install",
         "target page, context or browser has been closed",
+        "camoufox executable",
+        "camoufox fetch",
+        "browser not found",
     )
     if any(marker in message for marker in browser_unavailable_markers):
         return "BROWSER_UNAVAILABLE"
@@ -1326,19 +1531,27 @@ async def fetch_for_strategy(
                     except Exception as exc:
                         nonfatal_errors.append(f"settle_wait:{exc}")
                 try:
-                    await page.evaluate(
+                    await _evaluate_page_script(
+                        page,
                         """() => {
                             const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
                             if (height > window.innerHeight * 2) {
                                 window.scrollTo(0, Math.min(height * 0.35, 1600));
                                 window.scrollTo(0, 0);
                             }
-                        }"""
+                        }""",
+                        engine=engine,
+                        modifies_dom=True,
                     )
                 except Exception as exc:
                     nonfatal_errors.append(f"scroll:{exc}")
                 try:
-                    await page.evaluate(_UNHIDE_SCRIPT)
+                    await _evaluate_page_script(
+                        page,
+                        _UNHIDE_SCRIPT,
+                        engine=engine,
+                        modifies_dom=True,
+                    )
                 except Exception as exc:
                     nonfatal_errors.append(f"unhide:{exc}")
                 try:
