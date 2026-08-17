@@ -8,6 +8,8 @@ gate before the pipeline short-circuits.
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import os
 import random
 import time
@@ -17,6 +19,11 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import quote, urljoin, urlparse
 
 import httpx
+
+try:
+    from curl_cffi.requests import AsyncSession as CurlAsyncSession
+except ImportError:  # optional protocol-level impersonation
+    CurlAsyncSession = None  # type: ignore[assignment,misc]
 
 from .quality import (
     QualityResult,
@@ -44,8 +51,15 @@ REFERER_TWITTER = "https://t.co/"
 TIMEOUT = 30.0
 GOOGLEBOT_TIMEOUT = 10.0
 MAX_REDIRECTS = 10
+CURL_CFFI_IMPERSONATE = os.environ.get("PAC_CURL_IMPERSONATE", "chrome").strip() or "chrome"
 ARCHIVE_IS_COOLDOWN_S = float(os.environ.get("PAC_ARCHIVE_COOLDOWN_S", "300"))
 _archive_is_fail_at: dict[str, float] = {}
+ARCHIVE_TODAY_HOSTS = tuple(
+    host.strip().lower()
+    for host in os.environ.get("PAC_ARCHIVE_TODAY_HOSTS", "archive.today,archive.ph").split(",")
+    if host.strip()
+) or ("archive.today", "archive.ph")
+WAYBACK_AVAILABLE_ENDPOINT = "https://archive.org/wayback/available"
 
 _FAILURE_PRIORITY = {
     "SSRF_BLOCKED": 100,
@@ -263,6 +277,19 @@ class AsyncHandler(ABC):
     @abstractmethod
     async def process(self, context: Context) -> dict[str, Any] | None:
         """Attempt this handler and return a final envelope on success."""
+
+
+StrategyHandler = AsyncHandler
+
+
+class Pipeline:
+    """Thin orchestration wrapper around the existing handler chain."""
+
+    def __init__(self, first_handler: AsyncHandler) -> None:
+        self._first_handler = first_handler
+
+    async def run(self, context: Context) -> dict[str, Any] | None:
+        return await self._first_handler.handle(context)
 
 
 class DirectHttpHandler(AsyncHandler):
@@ -558,175 +585,414 @@ class StealthBrowserHandler(AsyncHandler):
         return None
 
 
-class ArchiveFallbackHandler(AsyncHandler):
-    """Conditional archive.is and Internet Archive snapshot fallback."""
+class MultiGatewayArchiveHandler(AsyncHandler):
+    """Resilient archive ladder: archive.today/ph -> Wayback -> reader gateway.
+
+    The handler is activated by the same ``archive_is`` / ``archive_org`` plan
+    markers used by Phase 2.  This deliberately keeps planning and CLI behavior
+    stable while making the archive step internally composite.
+    """
 
     async def process(self, context: Context) -> dict[str, Any] | None:
-        steps = [
-            step
-            for step in context.options.plan
-            if step in {"archive_is", "archive_org"}
-        ]
-        for step in steps:
-            if step == "archive_is":
-                last_failure = _archive_is_fail_at.get(context.domain)
-                if last_failure and time.monotonic() - last_failure < ARCHIVE_IS_COOLDOWN_S:
-                    context.strategy_hit.append("archive_is_skipped_cooldown")
-                    continue
+        if not any(step in {"archive_is", "archive_org"} for step in context.options.plan):
+            return None
 
-            started_at = time.perf_counter()
-            if step == "archive_is":
-                archive_url = f"https://archive.is/newest/{quote(context.url, safe='')}"
-                label = "archive_is"
-            else:
-                archive_url = f"https://web.archive.org/web/2/{context.url}"
-                label = "archive_org"
+        result = await self._try_archive_today(context)
+        if result is not None:
+            return result
 
-            try:
-                assert_public_url(archive_url)
-                from .browser import get_domain_rate_limiter
+        result = await self._try_wayback(context)
+        if result is not None:
+            return result
 
-                archive_domain = urlparse(archive_url).hostname or label
-                limiter = get_domain_rate_limiter()
-                async with limiter.limit(archive_domain):
-                    async with asyncio.timeout(TIMEOUT):
-                        html, status = await fetch_page(
-                            archive_url,
-                            SiteStrategy(domain=context.domain, useragent=""),
-                            context.client,
-                            timeout=TIMEOUT,
-                        )
-            except SSRFBlocked as exc:
-                context.strategy_hit.append(f"{step}_error")
-                context.note_failure(
-                    "SSRF_BLOCKED",
-                    error=str(exc),
-                    failure_class="config",
-                    engine=label,
-                )
-                context.record_attempt(
-                    handler=self.__class__.__name__,
-                    label=f"{step}_error",
-                    engine=label,
-                    status=0,
-                    started_at=started_at,
-                    error_code="SSRF_BLOCKED",
-                    error=str(exc),
-                )
-                return context.failure_result()
-            except Exception as exc:
-                if step == "archive_is":
-                    _archive_is_fail_at[context.domain] = time.monotonic()
-                context.strategy_hit.append(f"{step}_error")
-                context.note_failure(
-                    "ARCHIVE_FAILED",
-                    error=str(exc),
-                    failure_class="network",
-                    engine=label,
-                )
-                context.record_attempt(
-                    handler=self.__class__.__name__,
-                    label=f"{step}_error",
-                    engine=label,
-                    status=0,
-                    started_at=started_at,
-                    error_code="ARCHIVE_FAILED",
-                    error=str(exc),
-                )
-                continue
+        return await self._try_reader_gateway(context)
 
-            context.strategy_hit.append(label)
-            context.note_response(html, status, engine=label)
-            if step == "archive_is" and status in {403, 429, 503}:
-                _archive_is_fail_at[context.domain] = time.monotonic()
+    async def _try_archive_today(self, context: Context) -> dict[str, Any] | None:
+        last_failure = _archive_is_fail_at.get(context.domain)
+        if last_failure and time.monotonic() - last_failure < ARCHIVE_IS_COOLDOWN_S:
+            context.strategy_hit.append("archive_is_skipped_cooldown")
+            return None
 
-            access = classify_access_control_page(html, status=status)
-            if access.detected:
-                archive_error = (
-                    f"{label}:{'BOT_CHALLENGE' if access.challenge else 'HTTP_BLOCKED'}:"
-                    f"{access.reason}"
-                )
-                context.note_failure(
-                    "ARCHIVE_FAILED",
-                    error=archive_error,
-                    failure_class="network",
-                    status=status,
-                    engine=label,
-                )
-                context.record_attempt(
-                    handler=self.__class__.__name__,
-                    label=label,
-                    engine=label,
-                    status=status,
-                    started_at=started_at,
-                    error_code="ARCHIVE_FAILED",
-                    error=archive_error,
-                )
-                continue
+        primary_failed = False
+        for index, host in enumerate(ARCHIVE_TODAY_HOSTS):
+            label = "archive_is" if index == 0 else ("archive_ph" if host == "archive.ph" else f"archive_{host.split('.')[0]}")
+            archive_url = f"https://{host}/newest/{quote(context.url, safe='')}"
+            outcome = await self._attempt_html_gateway(
+                context,
+                archive_url,
+                label=label,
+                engine=label,
+                failure_code="ARCHIVE_FAILED",
+            )
+            if outcome.result is not None:
+                return outcome.result
+            if outcome.cooldown:
+                primary_failed = True
+            if outcome.fatal_result is not None:
+                return outcome.fatal_result
 
-            if 200 <= status < 300 and html:
-                evaluation = await _evaluate_candidate(
-                    html,
-                    context.url,
-                    context.domain,
-                    dom_result=None,
-                    allow_partial=context.options.allow_partial,
-                    strategy_hit=context.strategy_hit,
-                    rule_version=context.options.rule_version,
-                    engine=label,
-                    t0=context.started_at,
-                    full_markdown=context.options.full_markdown,
-                    warnings=context.warnings,
-                )
-                context.last_quality = evaluation.quality
-                if evaluation.result is not None:
-                    context.record_attempt(
-                        handler=self.__class__.__name__,
-                        label=label,
-                        engine=label,
-                        status=status,
-                        started_at=started_at,
-                        quality_reason=str(getattr(evaluation.quality, "reason", "pass")),
-                    )
-                    return evaluation.result
-                code, error, failure_class = _quality_failure(evaluation)
-                context.note_failure(
-                    code,
-                    error=error,
-                    failure_class=failure_class,
-                    status=status,
-                    engine=label,
-                )
-                context.record_attempt(
-                    handler=self.__class__.__name__,
-                    label=label,
-                    engine=label,
-                    status=status,
-                    started_at=started_at,
-                    error_code=code,
-                    error=error,
-                    quality_reason=str(getattr(evaluation.quality, "reason", "")),
-                )
-                continue
+        if primary_failed:
+            _archive_is_fail_at[context.domain] = time.monotonic()
+        return None
 
-            archive_error = f"{label}:HTTP {status}" if status else f"{label}:fetch_failed"
+    async def _try_wayback(self, context: Context) -> dict[str, Any] | None:
+        lookup_started = time.perf_counter()
+        lookup_url = f"{WAYBACK_AVAILABLE_ENDPOINT}?url={quote(context.url, safe='')}"
+        try:
+            assert_public_url(lookup_url)
+            lookup_html, lookup_status = await self._limited_fetch(
+                context,
+                lookup_url,
+                SiteStrategy(domain="archive.org", useragent=""),
+                timeout=TIMEOUT,
+            )
+        except SSRFBlocked as exc:
+            context.strategy_hit.append("archive_org_lookup_error")
+            context.note_failure(
+                "SSRF_BLOCKED",
+                error=str(exc),
+                failure_class="config",
+                engine="archive_org",
+            )
+            context.record_attempt(
+                handler=self.__class__.__name__,
+                label="archive_org_lookup_error",
+                engine="archive_org",
+                status=0,
+                started_at=lookup_started,
+                error_code="SSRF_BLOCKED",
+                error=str(exc),
+            )
+            return context.failure_result()
+        except Exception as exc:
+            context.strategy_hit.append("archive_org_lookup_error")
             context.note_failure(
                 "ARCHIVE_FAILED",
-                error=archive_error,
+                error=f"archive_org_lookup:{exc}",
+                failure_class="network",
+                engine="archive_org",
+            )
+            context.record_attempt(
+                handler=self.__class__.__name__,
+                label="archive_org_lookup_error",
+                engine="archive_org",
+                status=0,
+                started_at=lookup_started,
+                error_code="ARCHIVE_FAILED",
+                error=str(exc),
+            )
+            return None
+
+        context.strategy_hit.append("archive_org_lookup")
+        context.record_attempt(
+            handler=self.__class__.__name__,
+            label="archive_org_lookup",
+            engine="archive_org",
+            status=lookup_status,
+            started_at=lookup_started,
+            error_code="" if lookup_status == 200 else "ARCHIVE_FAILED",
+            error="" if lookup_status == 200 else f"HTTP {lookup_status}",
+        )
+        if lookup_status != 200:
+            context.note_failure(
+                "ARCHIVE_FAILED",
+                error=f"archive_org_lookup:HTTP {lookup_status}",
+                failure_class="network",
+                status=lookup_status,
+                engine="archive_org",
+            )
+            return None
+
+        snapshot_url = _parse_wayback_snapshot_url(lookup_html)
+        if not snapshot_url:
+            context.note_failure(
+                "ARCHIVE_FAILED",
+                error="archive_org:no_available_snapshot",
+                failure_class="network",
+                status=lookup_status,
+                engine="archive_org",
+            )
+            return None
+
+        parsed = urlparse(snapshot_url)
+        snapshot_host = (parsed.hostname or "").casefold().rstrip(".")
+        if not (
+            snapshot_host == "web.archive.org"
+            or snapshot_host.endswith(".archive.org")
+        ):
+            context.note_failure(
+                "ARCHIVE_FAILED",
+                error=f"archive_org:unexpected_snapshot_host:{snapshot_host or 'empty'}",
+                failure_class="network",
+                engine="archive_org",
+            )
+            return None
+
+        outcome = await self._attempt_html_gateway(
+            context,
+            snapshot_url,
+            label="archive_org",
+            engine="archive_org",
+            failure_code="ARCHIVE_FAILED",
+        )
+        if outcome.fatal_result is not None:
+            return outcome.fatal_result
+        return outcome.result
+
+    async def _try_reader_gateway(self, context: Context) -> dict[str, Any] | None:
+        template = _reader_gateway_template(context.strategy)
+        if not template:
+            return None
+        try:
+            gateway_url = _format_reader_gateway_url(template, context.url)
+        except ValueError as exc:
+            context.add_warning(f"reader_gateway:{exc}")
+            return None
+
+        outcome = await self._attempt_html_gateway(
+            context,
+            gateway_url,
+            label="reader_gateway",
+            engine="reader_gateway",
+            failure_code="ARCHIVE_FAILED",
+        )
+        if outcome.fatal_result is not None:
+            return outcome.fatal_result
+        return outcome.result
+
+    async def _limited_fetch(
+        self,
+        context: Context,
+        url: str,
+        strategy: SiteStrategy | None,
+        *,
+        timeout: float,
+    ) -> tuple[str, int]:
+        from .browser import get_domain_rate_limiter
+
+        gateway_domain = urlparse(url).hostname or context.domain
+        limiter = get_domain_rate_limiter()
+        async with limiter.limit(gateway_domain):
+            async with asyncio.timeout(timeout):
+                return await fetch_page(
+                    url,
+                    strategy,
+                    context.client,
+                    timeout=timeout,
+                )
+
+    async def _attempt_html_gateway(
+        self,
+        context: Context,
+        gateway_url: str,
+        *,
+        label: str,
+        engine: str,
+        failure_code: str,
+    ) -> "_GatewayOutcome":
+        started_at = time.perf_counter()
+        try:
+            assert_public_url(gateway_url)
+            html, status = await self._limited_fetch(
+                context,
+                gateway_url,
+                SiteStrategy(domain=urlparse(gateway_url).hostname or context.domain, useragent=""),
+                timeout=TIMEOUT,
+            )
+        except SSRFBlocked as exc:
+            error_label = f"{label}_error"
+            context.strategy_hit.append(error_label)
+            context.note_failure(
+                "SSRF_BLOCKED",
+                error=str(exc),
+                failure_class="config",
+                engine=engine,
+            )
+            context.record_attempt(
+                handler=self.__class__.__name__,
+                label=error_label,
+                engine=engine,
+                status=0,
+                started_at=started_at,
+                error_code="SSRF_BLOCKED",
+                error=str(exc),
+            )
+            return _GatewayOutcome(
+                fatal_result=context.failure_result(),
+                cooldown=label.startswith("archive_"),
+            )
+        except Exception as exc:
+            error_label = f"{label}_error"
+            context.strategy_hit.append(error_label)
+            context.note_failure(
+                failure_code,
+                error=f"{label}:{exc}",
+                failure_class="network",
+                engine=engine,
+            )
+            context.record_attempt(
+                handler=self.__class__.__name__,
+                label=error_label,
+                engine=engine,
+                status=0,
+                started_at=started_at,
+                error_code=failure_code,
+                error=str(exc),
+            )
+            return _GatewayOutcome(cooldown=label in {"archive_is", "archive_ph", "archive_today"})
+
+        context.strategy_hit.append(label)
+        context.note_response(html, status, engine=engine)
+        access = classify_access_control_page(html, status=status)
+        if access.detected:
+            error = (
+                f"{label}:{'BOT_CHALLENGE' if access.challenge else 'HTTP_BLOCKED'}:"
+                f"{access.reason}"
+            )
+            context.note_failure(
+                failure_code,
+                error=error,
                 failure_class="network",
                 status=status,
-                engine=label,
+                engine=engine,
             )
             context.record_attempt(
                 handler=self.__class__.__name__,
                 label=label,
-                engine=label,
+                engine=engine,
                 status=status,
                 started_at=started_at,
-                error_code="ARCHIVE_FAILED",
-                error=archive_error,
+                error_code=failure_code,
+                error=error,
             )
-        return None
+            return _GatewayOutcome(
+                cooldown=label.startswith("archive_") and status in {403, 429, 503},
+            )
+
+        if 200 <= status < 300 and html:
+            evaluation = await _evaluate_candidate(
+                html,
+                context.url,
+                context.domain,
+                dom_result=None,
+                allow_partial=context.options.allow_partial,
+                strategy_hit=context.strategy_hit,
+                rule_version=context.options.rule_version,
+                engine=engine,
+                t0=context.started_at,
+                full_markdown=context.options.full_markdown,
+                warnings=context.warnings,
+            )
+            context.last_quality = evaluation.quality
+            if evaluation.result is not None:
+                context.record_attempt(
+                    handler=self.__class__.__name__,
+                    label=label,
+                    engine=engine,
+                    status=status,
+                    started_at=started_at,
+                    quality_reason=str(getattr(evaluation.quality, "reason", "pass")),
+                )
+                return _GatewayOutcome(result=evaluation.result)
+
+            code, error, failure_class = _quality_failure(evaluation)
+            context.note_failure(
+                code,
+                error=error,
+                failure_class=failure_class,
+                status=status,
+                engine=engine,
+            )
+            context.record_attempt(
+                handler=self.__class__.__name__,
+                label=label,
+                engine=engine,
+                status=status,
+                started_at=started_at,
+                error_code=code,
+                error=error,
+                quality_reason=str(getattr(evaluation.quality, "reason", "")),
+            )
+            return _GatewayOutcome()
+
+        error = f"{label}:HTTP {status}" if status else f"{label}:fetch_failed"
+        context.note_failure(
+            failure_code,
+            error=error,
+            failure_class="network",
+            status=status,
+            engine=engine,
+        )
+        context.record_attempt(
+            handler=self.__class__.__name__,
+            label=label,
+            engine=engine,
+            status=status,
+            started_at=started_at,
+            error_code=failure_code,
+            error=error,
+        )
+        return _GatewayOutcome(
+            cooldown=label.startswith("archive_") and status in {403, 429, 503},
+        )
+
+
+@dataclass
+class _GatewayOutcome:
+    result: dict[str, Any] | None = None
+    fatal_result: dict[str, Any] | None = None
+    cooldown: bool = False
+
+
+class ArchiveFallbackHandler(MultiGatewayArchiveHandler):
+    """Backward-compatible Phase 2 class name for the composite archive handler."""
+
+
+def _parse_wayback_snapshot_url(payload: str) -> str:
+    try:
+        document = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(document, Mapping):
+        return ""
+    archived = document.get("archived_snapshots")
+    if not isinstance(archived, Mapping):
+        return ""
+    closest = archived.get("closest")
+    if not isinstance(closest, Mapping):
+        return ""
+    available = closest.get("available")
+    status = str(closest.get("status") or "")
+    snapshot_url = str(closest.get("url") or "").strip()
+    if available is False or status != "200" or not snapshot_url:
+        return ""
+    return snapshot_url
+
+
+def _reader_gateway_template(strategy: SiteStrategy | None) -> str:
+    if strategy is not None and isinstance(strategy.extra, Mapping):
+        value = strategy.extra.get("reader_gateway") or strategy.extra.get("reader_gateway_url")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return os.environ.get("PAC_READER_GATEWAY", "").strip()
+
+
+def _format_reader_gateway_url(template: str, target_url: str) -> str:
+    value = template.strip()
+    if not value:
+        raise ValueError("empty_template")
+    encoded = quote(target_url, safe="")
+    if "{url_encoded}" in value:
+        result = value.replace("{url_encoded}", encoded)
+    elif "{url}" in value:
+        result = value.replace("{url}", target_url)
+    else:
+        separator = "&" if "?" in value else "?"
+        result = f"{value}{separator}url={encoded}"
+    parsed = urlparse(result)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("invalid_template_result")
+    return result
 
 
 def build_headers(strategy: SiteStrategy | None) -> dict[str, str]:
@@ -848,6 +1114,252 @@ def plan_execution_steps(
     return build_plan(strategy, use_browser, force_archive=force_archive)
 
 
+class _AdaptiveHttpClient:
+    """Owned async transport that prefers curl_cffi and fails open to httpx.
+
+    The public API remains httpx-compatible at the strategy boundary.  The
+    wrapper exists only for internally owned sessions, so callers that inject
+    an ``httpx.AsyncClient`` retain exactly their previous behavior.
+    """
+
+    def __init__(self, *, timeout: float = TIMEOUT) -> None:
+        self._timeout = float(timeout)
+        self._curl: Any | None = None
+        self._httpx: httpx.AsyncClient | None = None
+        self._curl_disabled = False
+        self._curl_failure = ""
+        self.last_transport = "httpx"
+
+    @property
+    def curl_failure(self) -> str:
+        return self._curl_failure
+
+    async def _curl_session(self) -> Any | None:
+        if self._curl_disabled or CurlAsyncSession is None:
+            return None
+        if not _curl_cffi_enabled():
+            self._curl_disabled = True
+            return None
+        if self._curl is None:
+            try:
+                self._curl = CurlAsyncSession()
+            except Exception as exc:
+                self._curl_failure = str(exc)
+                self._curl_disabled = True
+                return None
+        return self._curl
+
+    async def _httpx_session(self) -> httpx.AsyncClient:
+        if self._httpx is None:
+            self._httpx = httpx.AsyncClient(
+                follow_redirects=False,
+                timeout=self._timeout,
+                trust_env=True,
+            )
+        return self._httpx
+
+    async def get(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        timeout: float,
+        strategy: SiteStrategy | None,
+    ) -> Any:
+        curl_session = await self._curl_session()
+        if curl_session is not None:
+            try:
+                request_kwargs: dict[str, Any] = {
+                    "headers": dict(headers),
+                    "allow_redirects": False,
+                    "timeout": float(timeout),
+                    "impersonate": CURL_CFFI_IMPERSONATE,
+                    # Browser impersonation normally injects a browser header set.
+                    # PAC rule headers are authoritative, so only TLS/H2/H3
+                    # fingerprint impersonation is wanted here.
+                    "default_headers": False,
+                }
+                cookies = _strategy_cookies(strategy)
+                if cookies:
+                    request_kwargs["cookies"] = cookies
+                proxy_kwargs = _curl_proxy_kwargs(url, strategy)
+                request_kwargs.update(proxy_kwargs)
+                response = await curl_session.get(url, **request_kwargs)
+                self.last_transport = "curl_cffi"
+                return response
+            except Exception as exc:
+                # A partial/broken optional installation must never make the
+                # baseline path less reliable. Disable it for this owned client
+                # and continue through standard httpx.
+                self._curl_failure = str(exc)
+                self._curl_disabled = True
+
+        httpx_session = await self._httpx_session()
+        self.last_transport = "httpx"
+        return await httpx_session.get(
+            url,
+            headers=dict(headers),
+            follow_redirects=False,
+            timeout=float(timeout),
+        )
+
+    async def aclose(self) -> None:
+        if self._curl is not None:
+            await _close_async_client(self._curl)
+            self._curl = None
+        if self._httpx is not None:
+            await self._httpx.aclose()
+            self._httpx = None
+
+
+def _curl_cffi_enabled() -> bool:
+    raw = os.environ.get("PAC_CURL_CFFI", "auto").strip().casefold()
+    return raw not in {"0", "false", "off", "no", "disabled", "httpx"}
+
+
+def _is_curl_client(client: Any) -> bool:
+    if CurlAsyncSession is None:
+        return False
+    try:
+        return isinstance(client, CurlAsyncSession)
+    except TypeError:
+        return False
+
+
+def _strategy_cookies(strategy: SiteStrategy | None) -> Mapping[str, str] | None:
+    """Return explicit rule cookies without inventing cookie values.
+
+    Upstream rules normally use ``allow_cookies`` as a persistence flag rather
+    than carrying credentials.  This helper only forwards literal mapping data
+    if a local override explicitly supplies it under a supported key.
+    """
+
+    if strategy is None or not isinstance(strategy.extra, Mapping):
+        return None
+    for key in ("cookies", "custom_cookies"):
+        value = strategy.extra.get(key)
+        if isinstance(value, Mapping):
+            result = {
+                str(cookie_name): str(cookie_value)
+                for cookie_name, cookie_value in value.items()
+                if str(cookie_name).strip()
+            }
+            return result or None
+    return None
+
+
+def _cookie_header(strategy: SiteStrategy | None) -> str:
+    if strategy is None or not isinstance(strategy.extra, Mapping):
+        return ""
+    value = strategy.extra.get("cookie") or strategy.extra.get("cookie_header")
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _curl_proxy_kwargs(url: str, strategy: SiteStrategy | None) -> dict[str, Any]:
+    """Translate the existing browser proxy resolver into curl_cffi kwargs."""
+
+    try:
+        from .browser import resolve_proxy
+
+        proxy = resolve_proxy(url, strategy)
+    except Exception:
+        proxy = None
+    if proxy is None:
+        return {}
+    result: dict[str, Any] = {"proxy": proxy.server}
+    if proxy.username or proxy.password:
+        result["proxy_auth"] = (proxy.username, proxy.password)
+    return result
+
+
+async def _close_async_client(client: Any) -> None:
+    """Close either an httpx client or curl_cffi AsyncSession safely."""
+
+    method = getattr(client, "aclose", None)
+    if method is None:
+        method = getattr(client, "close", None)
+    if method is None:
+        return
+    result = method()
+    if inspect.isawaitable(result):
+        await result
+
+
+def _response_status(response: Any) -> int:
+    try:
+        return int(getattr(response, "status_code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _response_text(response: Any) -> str:
+    value = getattr(response, "text", "")
+    if callable(value):
+        value = value()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
+def _response_header(response: Any, name: str) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        value = headers.get(name)
+        if value is None:
+            value = headers.get(name.lower())
+    except Exception:
+        return ""
+    return str(value or "")
+
+
+def _response_url(response: Any, fallback: str) -> str:
+    value = getattr(response, "url", None)
+    return str(value or fallback)
+
+
+def _is_redirect_response(response: Any) -> bool:
+    return _response_status(response) in {301, 302, 303, 307, 308}
+
+
+async def _request_once(
+    client: Any,
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    timeout: float,
+    strategy: SiteStrategy | None,
+) -> Any:
+    if isinstance(client, _AdaptiveHttpClient):
+        return await client.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            strategy=strategy,
+        )
+    if _is_curl_client(client):
+        request_kwargs: dict[str, Any] = {
+            "headers": dict(headers),
+            "allow_redirects": False,
+            "timeout": float(timeout),
+            "impersonate": CURL_CFFI_IMPERSONATE,
+            "default_headers": False,
+        }
+        cookies = _strategy_cookies(strategy)
+        if cookies:
+            request_kwargs["cookies"] = cookies
+        request_kwargs.update(_curl_proxy_kwargs(url, strategy))
+        return await client.get(url, **request_kwargs)
+    return await client.get(
+        url,
+        headers=dict(headers),
+        follow_redirects=False,
+    )
+
+
 async def fetch_page(
     url: str,
     strategy: SiteStrategy | None = None,
@@ -855,39 +1367,50 @@ async def fetch_page(
     *,
     timeout: float = TIMEOUT,
 ) -> tuple[str, int]:
-    """Fetch HTML with manually validated redirect hops and SSRF protection."""
+    """Fetch HTML with manual SSRF-safe redirects and optional TLS impersonation.
+
+    ``curl_cffi`` is used only when available and enabled.  A missing or broken
+    optional dependency falls back to the exact standard ``httpx`` behavior.
+    A caller-supplied client is never replaced.
+    """
 
     assert_public_url(url)
     headers = build_headers(strategy) if strategy else build_fallback_headers()
+    cookie_header = _cookie_header(strategy)
+    if cookie_header and "Cookie" not in headers:
+        headers["Cookie"] = cookie_header
+
     own_client = client is None
     active_client: Any = client
     if active_client is None:
-        active_client = httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=timeout,
-            trust_env=True,
-        )
+        active_client = _AdaptiveHttpClient(timeout=timeout)
+
     current_url = url
     try:
         for redirect_count in range(MAX_REDIRECTS + 1):
-            response = await active_client.get(
+            assert_public_url(current_url)
+            response = await _request_once(
+                active_client,
                 current_url,
                 headers=headers,
-                follow_redirects=False,
+                timeout=timeout,
+                strategy=strategy,
             )
-            if not response.is_redirect:
-                return response.text, int(response.status_code)
-            location = response.headers.get("location")
+            status = _response_status(response)
+            text = _response_text(response)
+            if not _is_redirect_response(response):
+                return text, status
+            location = _response_header(response, "location")
             if not location:
-                return response.text, int(response.status_code)
+                return text, status
             if redirect_count >= MAX_REDIRECTS:
-                return response.text, int(response.status_code)
-            current_url = urljoin(str(response.url), location)
+                return text, status
+            current_url = urljoin(_response_url(response, current_url), location)
             assert_public_url(current_url)
         raise RuntimeError("redirect limit exceeded")
     finally:
         if own_client:
-            await active_client.aclose()
+            await _close_async_client(active_client)
 
 
 def _classify_http_response(status: int, body: str) -> tuple[str, str]:
@@ -1056,12 +1579,16 @@ def _build_handler_chain(plan: Sequence[str]) -> AsyncHandler:
     if "browser_cleanup" in plan:
         handlers.append(StealthBrowserHandler())
     if any(step in {"archive_is", "archive_org"} for step in plan):
-        handlers.append(ArchiveFallbackHandler())
+        handlers.append(MultiGatewayArchiveHandler())
     if not handlers:
         handlers.append(DirectHttpHandler())
     for current, following in zip(handlers, handlers[1:]):
         current.set_next(following)
     return handlers[0]
+
+
+def _build_pipeline(plan: Sequence[str]) -> Pipeline:
+    return Pipeline(_build_handler_chain(plan))
 
 
 async def fetch_article(
@@ -1115,11 +1642,7 @@ async def fetch_article(
     own_client = client is None
     active_client: Any = client
     if active_client is None:
-        active_client = httpx.AsyncClient(
-            follow_redirects=False,
-            timeout=TIMEOUT,
-            trust_env=True,
-        )
+        active_client = _AdaptiveHttpClient(timeout=TIMEOUT)
     context = Context(
         url=url,
         domain=resolved_domain,
@@ -1130,8 +1653,8 @@ async def fetch_article(
     )
 
     try:
-        chain = _build_handler_chain(plan)
-        result = await chain.handle(context)
+        pipeline = _build_pipeline(plan)
+        result = await pipeline.run(context)
         if result is not None:
             return result
         return context.failure_result()
@@ -1152,7 +1675,7 @@ async def fetch_article(
         return context.failure_result()
     finally:
         if own_client:
-            await active_client.aclose()
+            await _close_async_client(active_client)
 
 
 async def fetch_with_retries(
