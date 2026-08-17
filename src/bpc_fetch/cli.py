@@ -60,6 +60,11 @@ def main():
     p_batch.add_argument("--full", action="store_true")
     p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip lazy rule sync")
 
+    p_discover = sub.add_parser("discover", help="Discover recent articles from domain or RSS", parents=[_common])
+    p_discover.add_argument("target", help="Domain, RSS URL, or news topic query")
+    p_discover.add_argument("--query", "-q", type=str, default=None, help="Search keyword filter")
+    p_discover.add_argument("--limit", type=int, default=20, help="Max articles to discover")
+
     sub.add_parser("install-browser", help="Install Playwright Chromium", parents=[_common])
 
     p_rules = sub.add_parser("rules", help="Rules sync / show / version", parents=[_common])
@@ -105,6 +110,8 @@ async def _dispatch(args) -> dict:
         return await _cmd_fetch(args)
     if args.command == "batch":
         return await _cmd_batch(args)
+    if args.command == "discover":
+        return await _cmd_discover(args)
     if args.command == "install-browser":
         return _cmd_install_browser(args)
     if args.command == "rules":
@@ -271,7 +278,9 @@ async def _cmd_batch(args) -> dict:
     from .strategy import fetch_article
 
     urls = list(args.urls or [])
-    if args.file and args.file.exists():
+    if urls == ["-"] or (args.file and str(args.file) == "-") or (not sys.stdin.isatty() and not urls and not args.file):
+        urls = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip() and not ln.startswith("#")]
+    elif args.file and args.file.exists():
         urls.extend(
             ln.strip()
             for ln in args.file.read_text(encoding="utf-8").splitlines()
@@ -341,6 +350,16 @@ async def _cmd_batch(args) -> dict:
         "warnings": warnings,
         "results": results,
     }
+
+
+async def _cmd_discover(args) -> dict:
+    from .discover import discover_articles
+
+    return await discover_articles(
+        args.target,
+        limit=getattr(args, "limit", 20),
+        search_query=getattr(args, "query", None),
+    )
 
 
 def _cmd_install_browser(args) -> dict:
