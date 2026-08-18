@@ -52,6 +52,7 @@ DEFAULT_DOMAIN_CONCURRENCY = max(1, int(os.environ.get("PAC_DOMAIN_CONCURRENCY",
 DEFAULT_DOMAIN_RATE = max(0.01, float(os.environ.get("PAC_DOMAIN_RATE_PER_SECOND", "1.0")))
 DEFAULT_DOMAIN_BURST = max(1.0, float(os.environ.get("PAC_DOMAIN_BURST", "2")))
 DEFAULT_BROWSER_DRIVER = os.environ.get("PAC_BROWSER_DRIVER", "auto").strip().casefold() or "auto"
+DEFAULT_PROXY_COOLDOWN_SECONDS = max(1.0, float(os.environ.get("PAC_PROXY_COOLDOWN_S", "300")))
 
 _TRACKING_DOMAIN_SUFFIXES = (
     "doubleclick.net",
@@ -396,6 +397,8 @@ class BrowserResult:
     error_msg: str = ""
     final_url: str = ""
     challenge_provider: str = ""
+    proxy_server: str = ""
+    proxy_attempts: int = 0
 
 
 @dataclass(frozen=True)
@@ -419,6 +422,104 @@ class ProxySettings:
 
     def cache_key(self) -> tuple[str, str, str, str]:
         return (self.server, self.username, self.password, self.bypass)
+
+    def as_url(self) -> str:
+        """Return a credential-bearing proxy URL suitable for HTTP clients."""
+
+        if not self.username and not self.password:
+            return self.server
+        parsed = urlparse(self.server)
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        from urllib.parse import quote
+
+        username = quote(self.username, safe="")
+        password = quote(self.password, safe="")
+        credentials = username
+        if self.password:
+            credentials += f":{password}"
+        return f"{parsed.scheme}://{credentials}@{host}{port}"
+
+
+@dataclass
+class _ProxyFailureState:
+    blocked_until: float
+    error_code: str
+    failures: int
+
+
+class ProxyCircuitBreaker:
+    """Process-local cooldown circuit breaker for proxy candidates."""
+
+    _BLOCKING_CODES = frozenset({"BOT_CHALLENGE", "HTTP_BLOCKED"})
+
+    def __init__(self, cooldown_seconds: float = DEFAULT_PROXY_COOLDOWN_SECONDS) -> None:
+        self._cooldown_seconds = max(1.0, float(cooldown_seconds))
+        self._states: dict[tuple[str, str, str, str], _ProxyFailureState] = {}
+
+    def _key(self, proxy: ProxySettings) -> tuple[str, str, str, str]:
+        return proxy.cache_key()
+
+    def is_available(self, proxy: ProxySettings | None) -> bool:
+        if proxy is None:
+            return True
+        key = self._key(proxy)
+        state = self._states.get(key)
+        if state is None:
+            return True
+        if time.monotonic() >= state.blocked_until:
+            self._states.pop(key, None)
+            return True
+        return False
+
+    def remaining(self, proxy: ProxySettings | None) -> float:
+        if proxy is None:
+            return 0.0
+        state = self._states.get(self._key(proxy))
+        if state is None:
+            return 0.0
+        return max(0.0, state.blocked_until - time.monotonic())
+
+    def mark_failure(self, proxy: ProxySettings | None, error_code: str) -> None:
+        if proxy is None or error_code not in self._BLOCKING_CODES:
+            return
+        key = self._key(proxy)
+        previous = self._states.get(key)
+        failures = 1 if previous is None else previous.failures + 1
+        self._states[key] = _ProxyFailureState(
+            blocked_until=time.monotonic() + self._cooldown_seconds,
+            error_code=error_code,
+            failures=failures,
+        )
+
+    def mark_success(self, proxy: ProxySettings | None) -> None:
+        if proxy is not None:
+            self._states.pop(self._key(proxy), None)
+
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        output: dict[str, dict[str, Any]] = {}
+        now = time.monotonic()
+        for key, state in list(self._states.items()):
+            remaining = state.blocked_until - now
+            if remaining <= 0:
+                self._states.pop(key, None)
+                continue
+            output[key[0]] = {
+                "cooldown_remaining_s": round(remaining, 3),
+                "error_code": state.error_code,
+                "failures": state.failures,
+            }
+        return output
+
+
+_PROXY_CIRCUIT_BREAKER = ProxyCircuitBreaker()
+_AUTO_PROXY = object()
+
+
+def get_proxy_circuit_breaker() -> ProxyCircuitBreaker:
+    return _PROXY_CIRCUIT_BREAKER
 
 
 @dataclass(frozen=True)
@@ -643,50 +744,92 @@ def _normalize_proxy(raw: str, bypass: str = "") -> ProxySettings | None:
     return ProxySettings(server=server, username=username, password=password, bypass=bypass)
 
 
-def resolve_proxy(url: str, strategy: SiteStrategy | None = None) -> ProxySettings | None:
-    """Resolve a proxy using rule override, per-domain mapping, and environment fallback.
+def _parse_proxy_pool(raw: str) -> list[str]:
+    """Parse ``PAC_PROXIES`` as an ordered comma/newline-separated pool."""
 
-    Precedence is: ``strategy.extra['proxy']`` / ``proxy_server``;
-    ``PAC_PROXY_<DOMAIN>``; ``PAC_PROXY_MAP`` or ``PAC_DOMAIN_PROXIES``;
-    ``PAC_PROXY``; then ``HTTPS_PROXY`` / ``https_proxy``.
+    values: list[str] = []
+    for item in re.split(r"[,\n]+", raw or ""):
+        value = item.strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _strategy_proxy_settings(
+    strategy: SiteStrategy | None,
+    *,
+    default_bypass: str,
+) -> tuple[ProxySettings | None, bool]:
+    """Return an explicit per-strategy proxy while preserving mapping metadata.
+
+    The boolean indicates whether the strategy explicitly supplied a proxy
+    setting even when that value resolves to direct/off.  This prevents lower
+    precedence environment proxies from overriding an intentional strategy
+    choice and preserves Phase 3 mapping-level ``bypass`` semantics.
     """
 
+    if strategy is None or not isinstance(strategy.extra, Mapping):
+        return None, False
+    if "proxy" not in strategy.extra and "proxy_server" not in strategy.extra:
+        return None, False
+    raw = strategy.extra.get("proxy")
+    if raw is None:
+        raw = strategy.extra.get("proxy_server")
+    if isinstance(raw, Mapping):
+        server = str(raw.get("server") or "").strip()
+        if not server:
+            return None, True
+        proxy = _normalize_proxy(
+            server,
+            str(raw.get("bypass") or default_bypass),
+        )
+        if proxy is None:
+            return None, True
+        username = str(raw.get("username") or proxy.username or "")
+        password = str(raw.get("password") or proxy.password or "")
+        return (
+            ProxySettings(
+                server=proxy.server,
+                username=username,
+                password=password,
+                bypass=proxy.bypass,
+            ),
+            True,
+        )
+    value = str(raw or "").strip()
+    return _normalize_proxy(value, default_bypass), True
+
+
+def _proxy_candidate_values(
+    url: str,
+    strategy: SiteStrategy | None = None,
+    *,
+    strategy_explicit: bool = False,
+) -> list[str]:
     parsed = urlparse(url)
     domain = (parsed.hostname or (strategy.domain if strategy else "")).casefold().rstrip(".")
-    explicit = ""
-    bypass = os.environ.get("PAC_PROXY_BYPASS", "").strip()
-    if strategy is not None and isinstance(strategy.extra, Mapping):
-        raw = strategy.extra.get("proxy") or strategy.extra.get("proxy_server")
-        if isinstance(raw, Mapping):
-            server = str(raw.get("server") or "").strip()
-            if server:
-                normalized = _normalize_proxy(server, str(raw.get("bypass") or bypass))
-                if normalized is not None:
-                    return ProxySettings(
-                        server=normalized.server,
-                        username=str(raw.get("username") or normalized.username),
-                        password=str(raw.get("password") or normalized.password),
-                        bypass=str(raw.get("bypass") or normalized.bypass),
-                    )
-        elif raw:
-            explicit = str(raw).strip()
+    explicit_values: list[str] = []
 
-    if not explicit and domain:
+    if not strategy_explicit and domain:
         labels = domain.split(".")
         for index in range(max(1, len(labels) - 1)):
             suffix = ".".join(labels[index:])
             if suffix.count(".") < 1:
                 continue
-            explicit = os.environ.get(_domain_env_key(suffix), "").strip()
-            if explicit:
+            value = os.environ.get(_domain_env_key(suffix), "").strip()
+            if value:
+                explicit_values.append(value)
                 break
-    if not explicit and domain:
-        explicit = _proxy_from_mapping(domain)
-    if explicit:
-        return _normalize_proxy(explicit, bypass)
+    if not strategy_explicit and not explicit_values and domain:
+        value = _proxy_from_mapping(domain)
+        if value:
+            explicit_values.append(value)
 
-    if domain and _matches_no_proxy(domain):
-        return None
+    if not strategy_explicit and not explicit_values and domain and _matches_no_proxy(domain):
+        return []
+
+    values = list(explicit_values)
+    values.extend(_parse_proxy_pool(os.environ.get("PAC_PROXIES", "")))
     fallback = (
         os.environ.get("PAC_PROXY")
         or os.environ.get("HTTPS_PROXY")
@@ -697,7 +840,69 @@ def resolve_proxy(url: str, strategy: SiteStrategy | None = None) -> ProxySettin
         or os.environ.get("all_proxy")
         or ""
     )
-    return _normalize_proxy(fallback, bypass)
+    if not strategy_explicit and fallback:
+        values.append(fallback)
+    return values
+
+
+def resolve_proxy_candidates(
+    url: str,
+    strategy: SiteStrategy | None = None,
+) -> list[ProxySettings | None]:
+    """Return ordered healthy proxy candidates for a request.
+
+    Existing explicit per-strategy/domain precedence is preserved.  The
+    ``PAC_PROXIES`` ordered pool is appended after the selected explicit proxy
+    and before the legacy process-wide fallback.  Cooled-down proxies are
+    skipped.  If every configured proxy is cooling down, the one closest to
+    expiry is returned as a half-open probe rather than leaking traffic onto a
+    direct connection.
+    """
+
+    bypass = os.environ.get("PAC_PROXY_BYPASS", "").strip()
+    strategy_proxy, strategy_explicit = _strategy_proxy_settings(
+        strategy,
+        default_bypass=bypass,
+    )
+
+    candidates: list[ProxySettings] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    if strategy_explicit:
+        if strategy_proxy is None:
+            return [None]
+        candidates.append(strategy_proxy)
+        seen.add(strategy_proxy.cache_key())
+
+    raw_values = _proxy_candidate_values(
+        url,
+        strategy,
+        strategy_explicit=strategy_explicit,
+    )
+    for raw in raw_values:
+        proxy = _normalize_proxy(raw, bypass)
+        if proxy is None:
+            continue
+        key = proxy.cache_key()
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(proxy)
+
+    if not candidates:
+        return [None]
+
+    breaker = get_proxy_circuit_breaker()
+    available = [proxy for proxy in candidates if breaker.is_available(proxy)]
+    if available:
+        return available
+    half_open = min(candidates, key=breaker.remaining)
+    return [half_open]
+
+def resolve_proxy(url: str, strategy: SiteStrategy | None = None) -> ProxySettings | None:
+    """Backward-compatible single-proxy resolver."""
+
+    return resolve_proxy_candidates(url, strategy)[0]
 
 
 def _stealth_seed(domain: str, user_agent: str, proxy: ProxySettings | None) -> int:
@@ -772,6 +977,32 @@ async def ensure_browser() -> dict[str, Any]:
             "error": str(exc),
             "install_cmd": "playwright install chromium",
         }
+
+
+async def probe_camoufox() -> dict[str, Any]:
+    """Launch and close Camoufox to report optional-driver runtime health."""
+
+    if AsyncCamoufox is None:
+        return {"ok": False, "installed": False, "error": "camoufox not installed"}
+    manager: Any | None = None
+    try:
+        manager = AsyncCamoufox(
+            headless=_camoufox_headless_value(),
+            main_world_eval=True,
+        )
+        browser = await manager.__aenter__()
+        version = str(getattr(browser, "version", "") or "")
+        await manager.__aexit__(None, None, None)
+        manager = None
+        return {"ok": True, "installed": True, "version": version}
+    except Exception as exc:
+        return {"ok": False, "installed": True, "error": str(exc)[:500]}
+    finally:
+        if manager is not None:
+            try:
+                await manager.__aexit__(None, None, None)
+            except Exception:
+                pass
 
 
 class BrowserPool:
@@ -941,6 +1172,7 @@ class BrowserPool:
         strategy: SiteStrategy | None,
         url: str,
         domain: str,
+        proxy_override: ProxySettings | None | object = _AUTO_PROXY,
     ) -> tuple[_ContextKey, dict[str, str], ProxySettings | None]:
         from .strategy import UA_NORMAL, build_headers
 
@@ -954,7 +1186,7 @@ class BrowserPool:
         timezone_id = (timezone_raw or "America/New_York").strip() or "America/New_York"
         viewport_width = max(800, int(viewport_width_raw or "1365"))
         viewport_height = max(600, int(viewport_height_raw or "768"))
-        proxy = resolve_proxy(url, strategy)
+        proxy = resolve_proxy(url, strategy) if proxy_override is _AUTO_PROXY else proxy_override
         allow_cookies = bool(strategy and strategy.allow_cookies)
         explicit_user_agent = bool(
             strategy and (strategy.useragent or strategy.useragent_custom)
@@ -1200,13 +1432,16 @@ class BrowserPool:
         *,
         url: str = "",
         domain: str = "",
+        proxy_override: ProxySettings | None | object = _AUTO_PROXY,
     ) -> AsyncIterator[Page]:
         if not self._started:
             await self.start()
         parsed_domain = domain or (urlparse(url).hostname or (strategy.domain if strategy else ""))
         normalized_url = url or (f"https://{parsed_domain}/" if parsed_domain else "https://example.com/")
         async with self._sem:
-            key, headers, proxy = self._context_key(strategy, normalized_url, parsed_domain)
+            key, headers, proxy = self._context_key(
+                strategy, normalized_url, parsed_domain, proxy_override
+            )
             entry = await self._acquire_context(key, headers, proxy)
             page: Page | None = None
             reusable = True
@@ -1446,10 +1681,12 @@ def _navigation_error_code(error: BaseException) -> str:
     return "NETWORK"
 
 
-async def fetch_for_strategy(
+async def _fetch_for_strategy_single(
     url: str,
     strategy: SiteStrategy | None,
     pool: BrowserPool | None = None,
+    *,
+    proxy_override: ProxySettings | None | object = _AUTO_PROXY,
 ) -> BrowserResult:
     """Fetch a page with stealth masking, interception, proxying, and pooling."""
 
@@ -1480,7 +1717,9 @@ async def fetch_for_strategy(
 
     try:
         async with limiter.limit(domain):
-            async with active_pool.page(strategy, url=url, domain=domain) as page:
+            async with active_pool.page(
+                strategy, url=url, domain=domain, proxy_override=proxy_override
+            ) as page:
                 general_patterns = _compile_general_block_regexes(strategy) if strategy else []
                 strategy_patterns = _compile_strategy_block_regex(strategy)
                 block_images = _truthy_env("PAC_BROWSER_BLOCK_IMAGES", True)
@@ -1643,6 +1882,43 @@ async def fetch_for_strategy(
     finally:
         if own_pool:
             await active_pool.stop()
+
+
+async def fetch_for_strategy(
+    url: str,
+    strategy: SiteStrategy | None,
+    pool: BrowserPool | None = None,
+) -> BrowserResult:
+    """Fetch through the ordered proxy pool with circuit-breaker failover."""
+
+    candidates = resolve_proxy_candidates(url, strategy)
+    breaker = get_proxy_circuit_breaker()
+    last_result: BrowserResult | None = None
+    for attempt_number, proxy in enumerate(candidates, start=1):
+        result = await _fetch_for_strategy_single(
+            url,
+            strategy,
+            pool=pool,
+            proxy_override=proxy,
+        )
+        result.proxy_server = proxy.server if proxy is not None else ""
+        result.proxy_attempts = attempt_number
+        if result.ok:
+            breaker.mark_success(proxy)
+            return result
+        last_result = result
+        if proxy is not None and result.error_code in {"BOT_CHALLENGE", "HTTP_BLOCKED"}:
+            breaker.mark_failure(proxy, result.error_code)
+            continue
+        return result
+
+    if last_result is not None:
+        return last_result
+    return BrowserResult(
+        ok=False,
+        error_code="NETWORK",
+        error_msg="no proxy candidate available",
+    )
 
 
 async def fetch_with_browser(

@@ -60,6 +60,7 @@ ARCHIVE_TODAY_HOSTS = tuple(
     if host.strip()
 ) or ("archive.today", "archive.ph")
 WAYBACK_AVAILABLE_ENDPOINT = "https://archive.org/wayback/available"
+_AUTO_HTTP_PROXY = object()
 
 _FAILURE_PRIORITY = {
     "SSRF_BLOCKED": 100,
@@ -1117,15 +1118,16 @@ def plan_execution_steps(
 class _AdaptiveHttpClient:
     """Owned async transport that prefers curl_cffi and fails open to httpx.
 
-    The public API remains httpx-compatible at the strategy boundary.  The
-    wrapper exists only for internally owned sessions, so callers that inject
-    an ``httpx.AsyncClient`` retain exactly their previous behavior.
+    Internally owned clients can select a proxy per attempt.  ``httpx`` clients
+    are cached per proxy identity so the Phase 4 circuit breaker can fail over
+    without recreating a TCP pool for every request.  Caller-supplied clients
+    remain untouched for backward compatibility and deterministic tests.
     """
 
     def __init__(self, *, timeout: float = TIMEOUT) -> None:
         self._timeout = float(timeout)
         self._curl: Any | None = None
-        self._httpx: httpx.AsyncClient | None = None
+        self._httpx_sessions: dict[str, httpx.AsyncClient] = {}
         self._curl_disabled = False
         self._curl_failure = ""
         self.last_transport = "httpx"
@@ -1149,14 +1151,30 @@ class _AdaptiveHttpClient:
                 return None
         return self._curl
 
-    async def _httpx_session(self) -> httpx.AsyncClient:
-        if self._httpx is None:
-            self._httpx = httpx.AsyncClient(
-                follow_redirects=False,
-                timeout=self._timeout,
-                trust_env=True,
-            )
-        return self._httpx
+    async def _httpx_session(self, proxy_override: Any = _AUTO_HTTP_PROXY) -> httpx.AsyncClient:
+        proxy_url = ""
+        trust_env = True
+        key = "env"
+        if proxy_override is None:
+            trust_env = False
+            key = "direct"
+        elif proxy_override is not _AUTO_HTTP_PROXY:
+            trust_env = False
+            proxy_url = str(proxy_override.as_url())
+            key = "proxy:" + repr(proxy_override.cache_key())
+
+        session = self._httpx_sessions.get(key)
+        if session is None:
+            kwargs: dict[str, Any] = {
+                "follow_redirects": False,
+                "timeout": self._timeout,
+                "trust_env": trust_env,
+            }
+            if proxy_url:
+                kwargs["proxy"] = proxy_url
+            session = httpx.AsyncClient(**kwargs)
+            self._httpx_sessions[key] = session
+        return session
 
     async def get(
         self,
@@ -1165,6 +1183,7 @@ class _AdaptiveHttpClient:
         headers: Mapping[str, str],
         timeout: float,
         strategy: SiteStrategy | None,
+        proxy_override: Any = _AUTO_HTTP_PROXY,
     ) -> Any:
         curl_session = await self._curl_session()
         if curl_session is not None:
@@ -1174,27 +1193,26 @@ class _AdaptiveHttpClient:
                     "allow_redirects": False,
                     "timeout": float(timeout),
                     "impersonate": CURL_CFFI_IMPERSONATE,
-                    # Browser impersonation normally injects a browser header set.
-                    # PAC rule headers are authoritative, so only TLS/H2/H3
-                    # fingerprint impersonation is wanted here.
                     "default_headers": False,
                 }
                 cookies = _strategy_cookies(strategy)
                 if cookies:
                     request_kwargs["cookies"] = cookies
-                proxy_kwargs = _curl_proxy_kwargs(url, strategy)
-                request_kwargs.update(proxy_kwargs)
+                request_kwargs.update(
+                    _curl_proxy_kwargs(
+                        url,
+                        strategy,
+                        proxy_override=proxy_override,
+                    )
+                )
                 response = await curl_session.get(url, **request_kwargs)
                 self.last_transport = "curl_cffi"
                 return response
             except Exception as exc:
-                # A partial/broken optional installation must never make the
-                # baseline path less reliable. Disable it for this owned client
-                # and continue through standard httpx.
                 self._curl_failure = str(exc)
                 self._curl_disabled = True
 
-        httpx_session = await self._httpx_session()
+        httpx_session = await self._httpx_session(proxy_override)
         self.last_transport = "httpx"
         return await httpx_session.get(
             url,
@@ -1207,9 +1225,10 @@ class _AdaptiveHttpClient:
         if self._curl is not None:
             await _close_async_client(self._curl)
             self._curl = None
-        if self._httpx is not None:
-            await self._httpx.aclose()
-            self._httpx = None
+        sessions = list(self._httpx_sessions.values())
+        self._httpx_sessions.clear()
+        for session in sessions:
+            await session.aclose()
 
 
 def _curl_cffi_enabled() -> bool:
@@ -1257,15 +1276,24 @@ def _cookie_header(strategy: SiteStrategy | None) -> str:
     return ""
 
 
-def _curl_proxy_kwargs(url: str, strategy: SiteStrategy | None) -> dict[str, Any]:
-    """Translate the existing browser proxy resolver into curl_cffi kwargs."""
+def _curl_proxy_kwargs(
+    url: str,
+    strategy: SiteStrategy | None,
+    *,
+    proxy_override: Any = _AUTO_HTTP_PROXY,
+) -> dict[str, Any]:
+    """Translate PAC proxy selection into curl_cffi request kwargs."""
 
-    try:
-        from .browser import resolve_proxy
+    proxy: Any | None
+    if proxy_override is _AUTO_HTTP_PROXY:
+        try:
+            from .browser import resolve_proxy
 
-        proxy = resolve_proxy(url, strategy)
-    except Exception:
-        proxy = None
+            proxy = resolve_proxy(url, strategy)
+        except Exception:
+            proxy = None
+    else:
+        proxy = proxy_override
     if proxy is None:
         return {}
     result: dict[str, Any] = {"proxy": proxy.server}
@@ -1332,6 +1360,7 @@ async def _request_once(
     headers: Mapping[str, str],
     timeout: float,
     strategy: SiteStrategy | None,
+    proxy_override: Any = _AUTO_HTTP_PROXY,
 ) -> Any:
     if isinstance(client, _AdaptiveHttpClient):
         return await client.get(
@@ -1339,6 +1368,7 @@ async def _request_once(
             headers=headers,
             timeout=timeout,
             strategy=strategy,
+            proxy_override=proxy_override,
         )
     if _is_curl_client(client):
         request_kwargs: dict[str, Any] = {
@@ -1351,7 +1381,9 @@ async def _request_once(
         cookies = _strategy_cookies(strategy)
         if cookies:
             request_kwargs["cookies"] = cookies
-        request_kwargs.update(_curl_proxy_kwargs(url, strategy))
+        request_kwargs.update(
+            _curl_proxy_kwargs(url, strategy, proxy_override=proxy_override)
+        )
         return await client.get(url, **request_kwargs)
     return await client.get(
         url,
@@ -1367,11 +1399,11 @@ async def fetch_page(
     *,
     timeout: float = TIMEOUT,
 ) -> tuple[str, int]:
-    """Fetch HTML with manual SSRF-safe redirects and optional TLS impersonation.
+    """Fetch HTML with SSRF-safe redirects, TLS impersonation, and proxy failover.
 
-    ``curl_cffi`` is used only when available and enabled.  A missing or broken
-    optional dependency falls back to the exact standard ``httpx`` behavior.
-    A caller-supplied client is never replaced.
+    Internally owned transports rotate through ``PAC_PROXIES`` when a proxy is
+    rejected by a WAF.  A caller-supplied client is never replaced or silently
+    reconfigured.
     """
 
     assert_public_url(url)
@@ -1385,29 +1417,63 @@ async def fetch_page(
     if active_client is None:
         active_client = _AdaptiveHttpClient(timeout=timeout)
 
-    current_url = url
+    managed_failover = isinstance(active_client, _AdaptiveHttpClient)
+    if managed_failover:
+        try:
+            from .browser import resolve_proxy_candidates
+
+            proxy_candidates: list[Any] = resolve_proxy_candidates(url, strategy)
+        except Exception:
+            proxy_candidates = [_AUTO_HTTP_PROXY]
+    else:
+        proxy_candidates = [_AUTO_HTTP_PROXY]
+
+    last_text = ""
+    last_status = 0
     try:
-        for redirect_count in range(MAX_REDIRECTS + 1):
-            assert_public_url(current_url)
-            response = await _request_once(
-                active_client,
-                current_url,
-                headers=headers,
-                timeout=timeout,
-                strategy=strategy,
-            )
-            status = _response_status(response)
-            text = _response_text(response)
-            if not _is_redirect_response(response):
-                return text, status
-            location = _response_header(response, "location")
-            if not location:
-                return text, status
-            if redirect_count >= MAX_REDIRECTS:
-                return text, status
-            current_url = urljoin(_response_url(response, current_url), location)
-            assert_public_url(current_url)
-        raise RuntimeError("redirect limit exceeded")
+        for proxy in proxy_candidates:
+            current_url = url
+            try:
+                for redirect_count in range(MAX_REDIRECTS + 1):
+                    assert_public_url(current_url)
+                    response = await _request_once(
+                        active_client,
+                        current_url,
+                        headers=headers,
+                        timeout=timeout,
+                        strategy=strategy,
+                        proxy_override=proxy,
+                    )
+                    status = _response_status(response)
+                    text = _response_text(response)
+                    last_text, last_status = text, status
+                    if not _is_redirect_response(response):
+                        break
+                    location = _response_header(response, "location")
+                    if not location or redirect_count >= MAX_REDIRECTS:
+                        break
+                    current_url = urljoin(_response_url(response, current_url), location)
+                    assert_public_url(current_url)
+                else:
+                    raise RuntimeError("redirect limit exceeded")
+            except Exception:
+                raise
+
+            if managed_failover and proxy is not _AUTO_HTTP_PROXY and proxy is not None:
+                try:
+                    from .browser import get_proxy_circuit_breaker
+
+                    breaker = get_proxy_circuit_breaker()
+                    error_code, _ = _classify_http_response(last_status, last_text)
+                    if error_code in {"BOT_CHALLENGE", "HTTP_BLOCKED"}:
+                        breaker.mark_failure(proxy, error_code)
+                        continue
+                    if 200 <= last_status < 400:
+                        breaker.mark_success(proxy)
+                except Exception:
+                    pass
+            return last_text, last_status
+        return last_text, last_status
     finally:
         if own_client:
             await _close_async_client(active_client)
