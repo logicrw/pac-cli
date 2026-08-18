@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -13,6 +14,11 @@ from .sites import SITES_JS_DEFAULT, domain_from_url
 
 
 def main():
+    if os.environ.get("PAC_RULES_SWR_CHILD", "").strip() == "1":
+        from .rules.sync import _swr_child_main
+
+        raise SystemExit(_swr_child_main())
+
     parser = argparse.ArgumentParser(
         prog="pac",
         description="Fetch paywalled news articles as markdown (Agent-friendly JSON CLI)",
@@ -48,7 +54,7 @@ def main():
     p_fetch.add_argument("--archive", action="store_true", help="Force archive steps earlier")
     p_fetch.add_argument("--use-browser", action="store_true", default=None)
     p_fetch.add_argument("--no-browser", action="store_true")
-    p_fetch.add_argument("--no-rule-sync", action="store_true", help="Skip lazy rule sync")
+    p_fetch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
 
     p_batch = sub.add_parser("batch", help="Batch fetch (default summary only)", parents=[_common])
     p_batch.add_argument("urls", nargs="*", help="URLs")
@@ -58,7 +64,7 @@ def main():
     p_batch.add_argument("--max", type=int, default=10, help="Default cap 10, hard 25")
     p_batch.add_argument("--allow-partial", action="store_true")
     p_batch.add_argument("--full", action="store_true")
-    p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip lazy rule sync")
+    p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
 
     p_discover = sub.add_parser("discover", help="Discover recent articles from domain or RSS", parents=[_common])
     p_discover.add_argument("target", help="Domain, RSS URL, or news topic query")
@@ -126,10 +132,15 @@ async def _dispatch(args) -> dict:
 
 
 async def _cmd_doctor(args) -> dict:
+    import importlib.metadata
+    import importlib.util
+    import inspect
+
     from .rules.store import get_sites_map_with_version, load_manifest
 
-    issues = []
+    issues: list[str] = []
     sites, ver, warnings = get_sites_map_with_version(args.sites_js)
+    warnings = list(warnings)
     man = load_manifest()
 
     try:
@@ -151,12 +162,14 @@ async def _cmd_doctor(args) -> dict:
     pw_ver = ""
     try:
         from playwright.async_api import async_playwright  # noqa: F401
-        import importlib.metadata
 
         from .browser import ensure_browser
 
         pw_ok = True
-        pw_ver = importlib.metadata.version("playwright")
+        try:
+            pw_ver = importlib.metadata.version("playwright")
+        except importlib.metadata.PackageNotFoundError:
+            pw_ver = "unknown"
         browser_status = await ensure_browser()
         chromium_ok = bool(browser_status.get("ok"))
         if not chromium_ok:
@@ -166,20 +179,85 @@ async def _cmd_doctor(args) -> dict:
     except Exception:
         issues.append("playwright not installed")
 
+    curl_health: dict[str, object] = {
+        "installed": False,
+        "version": "",
+        "runtime_ok": False,
+        "error": "",
+    }
+    if importlib.util.find_spec("curl_cffi") is not None:
+        curl_health["installed"] = True
+        try:
+            curl_health["version"] = importlib.metadata.version("curl_cffi")
+        except importlib.metadata.PackageNotFoundError:
+            curl_health["version"] = "unknown"
+        try:
+            from curl_cffi.requests import AsyncSession
+
+            session = AsyncSession()
+            close_method = getattr(session, "aclose", None) or getattr(session, "close", None)
+            if close_method is not None:
+                close_result = close_method()
+                if inspect.isawaitable(close_result):
+                    await close_result
+            curl_health["runtime_ok"] = True
+        except Exception as exc:
+            curl_health["error"] = str(exc)[:500]
+            warnings.append(f"curl_cffi_runtime_unhealthy:{exc}")
+
+    camoufox_health: dict[str, object] = {
+        "installed": False,
+        "version": "",
+        "runtime_ok": False,
+        "error": "",
+    }
+    if importlib.util.find_spec("camoufox") is not None:
+        camoufox_health["installed"] = True
+        try:
+            camoufox_health["version"] = importlib.metadata.version("camoufox")
+        except importlib.metadata.PackageNotFoundError:
+            camoufox_health["version"] = "unknown"
+        try:
+            from .browser import probe_camoufox
+
+            camoufox_status = await probe_camoufox()
+            camoufox_health["runtime_ok"] = bool(camoufox_status.get("ok"))
+            if not camoufox_health["runtime_ok"]:
+                error = str(camoufox_status.get("error") or "Camoufox could not be launched")
+                camoufox_health["error"] = error[:500]
+                warnings.append(f"camoufox_runtime_unhealthy:{error}")
+        except Exception as exc:
+            camoufox_health["error"] = str(exc)[:500]
+            warnings.append(f"camoufox_runtime_unhealthy:{exc}")
+
     if man.get("stale") or man.get("using_bundled_base"):
-        warnings = list(warnings) + ["base_stale_or_bundled"]
+        warnings.append("base_stale_or_bundled")
 
     return {
         "ok": len(issues) == 0,
         "rule_version": ver,
         "site_count": len(sites),
-        "manifest": {k: man.get(k) for k in ("rule_version", "sources", "stale", "site_count") if man},
+        "manifest": {
+            key: man.get(key)
+            for key in (
+                "rule_version",
+                "sources",
+                "stale",
+                "site_count",
+                "fetched_at",
+                "last_attempt_at",
+                "revalidate_after",
+            )
+            if man
+        },
         "trafilatura": traf_ok,
         "httpx": httpx_ok,
         "playwright": pw_ok,
         "playwright_version": pw_ver,
         "chromium_installed": chromium_ok,
-        "warnings": warnings,
+        "curl_cffi": curl_health,
+        "camoufox": camoufox_health,
+        "warnings": list(dict.fromkeys(warnings)),
         "issues": issues,
         "sites_js_default": str(SITES_JS_DEFAULT),
     }
@@ -210,14 +288,15 @@ def _cmd_sites(args) -> dict:
 async def _cmd_fetch(args) -> dict:
     from .extract import download_images
     from .rules.store import get_sites_map_with_version
-    from .rules.sync import maybe_sync_rules
+    from .rules.sync import maybe_sync_rules, swr_nonblocking_mode
     from .strategy import fetch_article
 
     t0 = time.perf_counter()
     sites_js = getattr(args, "sites_js", None)
-    sync_result = maybe_sync_rules(
-        sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
-    )
+    with swr_nonblocking_mode():
+        sync_result = maybe_sync_rules(
+            sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
+        )
     sites, ver, warnings = get_sites_map_with_version(sites_js)
     warnings = list(sync_result.get("warnings") or []) + list(warnings)
     domain = domain_from_url(args.url)
@@ -271,20 +350,27 @@ async def _cmd_fetch(args) -> dict:
 
 async def _cmd_batch(args) -> dict:
     import asyncio as aio
-    import os
 
     from .rules.store import get_sites_map_with_version
-    from .rules.sync import maybe_sync_rules
+    from .rules.sync import maybe_sync_rules, swr_nonblocking_mode
     from .strategy import fetch_article
 
     urls = list(args.urls or [])
-    if urls == ["-"] or (args.file and str(args.file) == "-") or (not sys.stdin.isatty() and not urls and not args.file):
-        urls = [ln.strip() for ln in sys.stdin.read().splitlines() if ln.strip() and not ln.startswith("#")]
+    if (
+        urls == ["-"]
+        or (args.file and str(args.file) == "-")
+        or (not sys.stdin.isatty() and not urls and not args.file)
+    ):
+        urls = [
+            line.strip()
+            for line in sys.stdin.read().splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
     elif args.file and args.file.exists():
         urls.extend(
-            ln.strip()
-            for ln in args.file.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.startswith("#")
+            line.strip()
+            for line in args.file.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
         )
     hard_cap = min(int(os.environ.get("PAC_BATCH_HARD_CAP", "25")), 25)
     max_n = min(args.max or 10, hard_cap)
@@ -306,9 +392,10 @@ async def _cmd_batch(args) -> dict:
         }
 
     sites_js = getattr(args, "sites_js", None)
-    sync_result = maybe_sync_rules(
-        sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
-    )
+    with swr_nonblocking_mode():
+        sync_result = maybe_sync_rules(
+            sites_js=sites_js, disabled=bool(getattr(args, "no_rule_sync", False))
+        )
     sites, ver, warnings = get_sites_map_with_version(sites_js)
     warnings = list(dict.fromkeys(list(sync_result.get("warnings") or []) + list(warnings)))
     sem = aio.Semaphore(args.concurrency or 2)
