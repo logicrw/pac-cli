@@ -11,9 +11,11 @@ import contextvars
 import hashlib
 import json
 import os
+import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from contextlib import contextmanager
@@ -27,7 +29,14 @@ import httpx
 
 from ..sites import SITES_JS_DEFAULT, _extract_entries, entries_to_domain_map
 from ..ssrf import assert_public_url
-from .paths import cache_map_path, manifest_path, rules_root, sites_js_path, sites_updated_path
+from .paths import (
+    cache_map_path,
+    manifest_path,
+    rules_root,
+    sites_js_path,
+    sites_updated_path,
+    snapshot_path,
+)
 
 DEFAULT_UPDATED_URL = os.environ.get(
     "PAC_SITES_UPDATED_URL",
@@ -43,9 +52,12 @@ MAX_ZIP_COMPRESSION_RATIO = 200
 DEFAULT_RULES_TTL_SECONDS = 7 * 24 * 60 * 60
 DEFAULT_RULES_RETRY_BACKOFF_SECONDS = 60 * 60
 DEFAULT_SWR_LOCK_STALE_SECONDS = 15 * 60
+DEFAULT_LOCK_HARD_STALE_SECONDS = 2 * 60 * 60
 _SWR_LOCK_NAME = ".rules-swr.lock"
+_SYNC_LOCK_NAME = ".rules-sync.lock"
 _SWR_CHILD_ENV = "PAC_RULES_SWR_CHILD"
 _SWR_LOCK_ENV = "PAC_RULES_SWR_LOCK"
+_SWR_LOCK_TOKEN_ENV = "PAC_RULES_SWR_LOCK_TOKEN"
 _SWR_NONBLOCKING: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "pac_rules_swr_nonblocking", default=False
 )
@@ -170,6 +182,15 @@ def _swr_lock_stale_seconds() -> int:
 
 
 def _load_manifest_safe() -> dict[str, Any]:
+    committed = snapshot_path()
+    if committed.exists():
+        try:
+            snapshot = json.loads(committed.read_text(encoding="utf-8"))
+            manifest = snapshot.get("manifest") if isinstance(snapshot, dict) else None
+            if isinstance(manifest, dict):
+                return manifest
+        except (OSError, json.JSONDecodeError):
+            pass
     path = manifest_path()
     if not path.exists():
         return {}
@@ -203,14 +224,21 @@ def _freshness_state(
     ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     current = (now or _now_datetime()).astimezone(timezone.utc)
-    path = manifest_path()
+    path = snapshot_path() if snapshot_path().exists() else manifest_path()
     if not path.exists():
         return {"fresh": False, "reason": "missing", "manifest": {}}
 
-    try:
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"fresh": False, "reason": "corrupt", "manifest": {}}
+    if path == snapshot_path():
+        try:
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            manifest = snapshot.get("manifest") if isinstance(snapshot, dict) else None
+        except (OSError, json.JSONDecodeError):
+            manifest = None
+    else:
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = None
     if not isinstance(manifest, dict):
         return {"fresh": False, "reason": "corrupt", "manifest": {}}
 
@@ -309,16 +337,56 @@ def _swr_lock_path() -> Path:
     return rules_root() / _SWR_LOCK_NAME
 
 
-def _lock_is_stale(path: Path) -> bool:
+def _sync_lock_path() -> Path:
+    return rules_root() / _SYNC_LOCK_NAME
+
+
+def _read_lock_payload(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _lock_is_stale(path: Path, *, stale_seconds: int | None = None) -> bool:
     try:
         age = time.time() - path.stat().st_mtime
     except OSError:
         return True
-    return age >= _swr_lock_stale_seconds()
+    threshold = _swr_lock_stale_seconds() if stale_seconds is None else max(30, stale_seconds)
+    if age < threshold:
+        return False
+    # PID reuse or a permanently hung owner must not wedge rule updates forever.
+    # Normal sync operations are bounded by network timeouts, so two hours is a
+    # conservative hard ceiling before the lock is eligible for recovery.
+    if age >= max(DEFAULT_LOCK_HARD_STALE_SECONDS, threshold * 4):
+        return True
+    payload = _read_lock_payload(path)
+    try:
+        owner_pid = int(payload.get("owner_pid") or 0)
+    except (TypeError, ValueError):
+        owner_pid = 0
+    return not _pid_is_alive(owner_pid)
 
 
-def _acquire_swr_lock(path: Path) -> bool:
+def _acquire_owned_lock(path: Path, *, stale_seconds: int | None = None) -> str | None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_hex(16)
     for _ in range(2):
         try:
             descriptor = os.open(
@@ -327,33 +395,51 @@ def _acquire_swr_lock(path: Path) -> bool:
                 0o600,
             )
         except FileExistsError:
-            if _lock_is_stale(path):
+            if _lock_is_stale(path, stale_seconds=stale_seconds):
                 try:
                     path.unlink()
                 except OSError:
-                    return False
+                    return None
                 continue
-            return False
+            return None
+        payload = json.dumps(
+            {
+                "owner_pid": os.getpid(),
+                "created_at": _now(),
+                "token": token,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
         try:
-            payload = json.dumps(
-                {
-                    "owner_pid": os.getpid(),
-                    "created_at": _now(),
-                },
-                separators=(",", ":"),
-            ).encode("utf-8")
-            os.write(descriptor, payload)
-        finally:
-            os.close(descriptor)
-        return True
-    return False
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return token
+    return None
 
 
-def _release_swr_lock(path: Path) -> None:
+def _release_owned_lock(path: Path, token: str) -> None:
+    if not token:
+        return
     try:
+        payload = _read_lock_payload(path)
+        if payload.get("token") != token:
+            return
         path.unlink(missing_ok=True)
     except OSError:
         return
+
+
+def _acquire_swr_lock(path: Path) -> str | None:
+    return _acquire_owned_lock(path)
+
+
+def _release_swr_lock(path: Path, token: str) -> None:
+    _release_owned_lock(path, token)
 
 
 def _detached_process_kwargs() -> dict[str, Any]:
@@ -370,6 +456,28 @@ def _detached_process_kwargs() -> dict[str, Any]:
     else:
         kwargs["start_new_session"] = True
     return kwargs
+
+
+def _reap_detached_process(process: subprocess.Popen[Any]) -> None:
+    try:
+        process.wait()
+    except Exception:
+        return
+
+
+def _spawn_detached_process(command: list[str], environment: dict[str, str]) -> None:
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        **_detached_process_kwargs(),
+    )
+    reaper = threading.Thread(
+        target=_reap_detached_process,
+        args=(process,),
+        name="pac-rules-child-reaper",
+        daemon=True,
+    )
+    reaper.start()
 
 
 def schedule_rules_revalidation(
@@ -402,12 +510,14 @@ def schedule_rules_revalidation(
         return {**empty, "reason": "backoff"}
 
     lock_path = _swr_lock_path()
-    if not _acquire_swr_lock(lock_path):
+    lock_token = _acquire_swr_lock(lock_path)
+    if not lock_token:
         return {**empty, "reason": "already_revalidating"}
 
     environment = os.environ.copy()
     environment[_SWR_CHILD_ENV] = "1"
     environment[_SWR_LOCK_ENV] = str(lock_path)
+    environment[_SWR_LOCK_TOKEN_ENV] = lock_token
     code = (
         "from bpc_fetch.rules.sync import _swr_child_main; "
         "raise SystemExit(_swr_child_main())"
@@ -417,13 +527,9 @@ def schedule_rules_revalidation(
     else:
         command = [sys.executable, "-c", code]
     try:
-        subprocess.Popen(
-            command,
-            env=environment,
-            **_detached_process_kwargs(),
-        )
+        _spawn_detached_process(command, environment)
     except Exception as exc:
-        _release_swr_lock(lock_path)
+        _release_swr_lock(lock_path, lock_token)
         return {
             "attempted": True,
             "scheduled": False,
@@ -444,13 +550,14 @@ def _swr_child_main() -> int:
 
     lock_raw = os.environ.get(_SWR_LOCK_ENV, "").strip()
     lock_path = Path(lock_raw) if lock_raw else _swr_lock_path()
+    lock_token = os.environ.get(_SWR_LOCK_TOKEN_ENV, "").strip()
     try:
         result = sync_rules()
         return 0 if result.get("ok", False) else 1
     except BaseException:
         return 1
     finally:
-        _release_swr_lock(lock_path)
+        _release_swr_lock(lock_path, lock_token)
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -465,7 +572,15 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary_path, path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
@@ -565,7 +680,7 @@ def sync_rules(
     updated_url: str | None = None,
     offline: bool = False,
 ) -> dict:
-    """Run an explicit rules sync and atomically publish a usable local cache."""
+    """Run one serialized rules sync and atomically commit the runtime snapshot."""
 
     if os.environ.get("PAC_RULES_PIN", "").strip():
         return {
@@ -575,6 +690,34 @@ def sync_rules(
             "warnings": [],
             "sources": [],
         }
+
+    lock_path = _sync_lock_path()
+    lock_token = _acquire_owned_lock(lock_path, stale_seconds=30 * 60)
+    if not lock_token:
+        return {
+            "ok": False,
+            "error_code": "INTERNAL",
+            "error": "rules sync already running",
+            "warnings": ["rules_sync_busy"],
+            "sources": [],
+        }
+    try:
+        return _sync_rules_impl(
+            from_zip=from_zip,
+            updated_url=updated_url,
+            offline=offline,
+        )
+    finally:
+        _release_owned_lock(lock_path, lock_token)
+
+
+def _sync_rules_impl(
+    *,
+    from_zip: Path | None = None,
+    updated_url: str | None = None,
+    offline: bool = False,
+) -> dict:
+    """Run an explicit rules sync and atomically publish a usable local cache."""
 
     previous_manifest = _load_manifest_safe()
     previous_rule_version = str(previous_manifest.get("rule_version") or "")
@@ -723,6 +866,18 @@ def sync_rules(
         manifest_path(),
         json.dumps(manifest, ensure_ascii=False, indent=2),
     )
+    # Runtime readers prefer this single-file commit record.  Legacy files are
+    # still maintained for compatibility, but a crash before this write leaves
+    # the previous coherent snapshot visible to fetch/batch callers.
+    snapshot = {
+        "schema_version": 1,
+        "manifest": manifest,
+        "cache": cache_data,
+    }
+    _atomic_write_text(
+        snapshot_path(),
+        json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")),
+    )
 
     return {
         "ok": True,
@@ -733,4 +888,5 @@ def sync_rules(
         "stale": stale,
         "manifest_path": str(manifest_path()),
         "cache_path": str(cache_map_path()),
+        "snapshot_path": str(snapshot_path()),
     }

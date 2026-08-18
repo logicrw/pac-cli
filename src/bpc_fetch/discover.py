@@ -11,12 +11,14 @@ import asyncio
 import base64
 import binascii
 import re
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import Any, Iterable
 
 import httpx
 
+from .result import build_diagnostics, new_request_id
 from .sites import domain_from_url
 from .ssrf import SSRFBlocked, assert_public_url
 
@@ -38,6 +40,9 @@ COMMON_SITEMAP_PATHS = (
 )
 
 TIMEOUT = 15.0
+DISCOVERY_REDIRECT_LIMIT = 5
+DISCOVERY_MAX_BYTES = 2_000_000
+DISCOVERY_MAX_PARSE_CHARS = 5_000_000
 GOOGLE_NEWS_REDIRECT_LIMIT = 8
 GOOGLE_NEWS_RESOLVE_CONCURRENCY = 8
 HEADERS = {
@@ -51,11 +56,68 @@ _GOOGLE_NEWS_PATH_MARKERS = frozenset({"articles", "read"})
 _URL_BYTES_RE = re.compile(rb"https?://[^\x00-\x20\x7f\"'<>\\]+", re.IGNORECASE)
 
 
+async def _safe_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    max_bytes: int = DISCOVERY_MAX_BYTES,
+) -> httpx.Response:
+    """GET a bounded response while validating every redirect before I/O."""
+
+    current = url
+    for redirect_count in range(DISCOVERY_REDIRECT_LIMIT + 1):
+        assert_public_url(current)
+        async with client.stream("GET", current, follow_redirects=False) as response:
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                if not location:
+                    raise RuntimeError("redirect missing Location")
+                if redirect_count >= DISCOVERY_REDIRECT_LIMIT:
+                    raise RuntimeError("redirect limit exceeded")
+                current = urllib.parse.urljoin(str(response.url), location)
+                continue
+
+            declared = response.headers.get("content-length")
+            if declared:
+                try:
+                    declared_size = int(declared)
+                except ValueError as exc:
+                    raise RuntimeError("invalid Content-Length") from exc
+                if declared_size < 0 or declared_size > max_bytes:
+                    raise RuntimeError("discovery response too large")
+
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(body) + len(chunk) > max_bytes:
+                    raise RuntimeError("discovery response too large")
+                body.extend(chunk)
+            headers = dict(response.headers)
+            headers.pop("content-encoding", None)
+            headers.pop("Content-Encoding", None)
+            headers.pop("content-length", None)
+            headers.pop("Content-Length", None)
+            return httpx.Response(
+                response.status_code,
+                headers=headers,
+                content=bytes(body),
+                request=response.request,
+            )
+    raise RuntimeError("redirect limit exceeded")
+
+
+def _discovery_warning(stage: str, exc: BaseException) -> str:
+    detail = str(exc).replace("\n", " ").strip()[:180]
+    suffix = f":{detail}" if detail else ""
+    return f"{stage}:{exc.__class__.__name__}{suffix}"
+
+
 async def discover_articles(
     target: str,
     *,
     limit: int = 20,
     search_query: str | None = None,
+    diagnostics: bool = False,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Discover articles from a domain, RSS feed URL, or Google News search query."""
 
@@ -63,6 +125,40 @@ async def discover_articles(
     articles: list[dict[str, str]] = []
     source_type = "unknown"
     source_url = target
+    warnings: list[str] = []
+    started_at = time.perf_counter()
+    diagnostic_request_id = (request_id or new_request_id()) if diagnostics else ""
+    diagnostic_attempts: list[dict[str, Any]] = []
+
+    async def diagnostic_get(stage: str, client: httpx.AsyncClient, request_url: str) -> httpx.Response:
+        attempt_started = time.perf_counter()
+        try:
+            response = await _safe_get(client, request_url)
+        except Exception as exc:
+            if diagnostics:
+                diagnostic_attempts.append({
+                    "handler": "Discovery",
+                    "label": stage,
+                    "engine": "discover_http",
+                    "status": 0,
+                    "elapsed_ms": int((time.perf_counter() - attempt_started) * 1000),
+                    "error_code": "SSRF_BLOCKED" if isinstance(exc, SSRFBlocked) else "NETWORK",
+                    "error": str(exc),
+                    "quality_reason": "",
+                })
+            raise
+        if diagnostics:
+            diagnostic_attempts.append({
+                "handler": "Discovery",
+                "label": stage,
+                "engine": "discover_http",
+                "status": int(response.status_code),
+                "elapsed_ms": int((time.perf_counter() - attempt_started) * 1000),
+                "error_code": "" if 200 <= response.status_code < 400 else "HTTP_BLOCKED",
+                "error": "",
+                "quality_reason": "",
+            })
+        return response
 
     async with httpx.AsyncClient(
         timeout=TIMEOUT,
@@ -79,14 +175,14 @@ async def discover_articles(
             )
             source_url = google_news_url
             try:
-                response = await client.get(google_news_url, follow_redirects=True)
+                response = await diagnostic_get("google_news", client, google_news_url)
                 if response.status_code == 200:
                     articles = _parse_rss(response.text, limit=effective_limit)
                     if articles:
                         articles = await _resolve_google_news_articles(articles, client)
                         source_type = "google_news_rss"
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.append(_discovery_warning("google_news", exc))
 
         if not articles:
             if target.startswith("http://") or target.startswith("https://"):
@@ -95,7 +191,7 @@ async def discover_articles(
                 base_url = f"https://{target}".rstrip("/")
 
             try:
-                response = await client.get(base_url, follow_redirects=True)
+                response = await diagnostic_get("base", client, base_url)
                 if response.status_code == 200:
                     content_type = response.headers.get("content-type", "").lower()
                     if (
@@ -115,7 +211,7 @@ async def discover_articles(
                         rss_links = _extract_rss_links_from_html(response.text, base_url)
                         for rss_url in rss_links:
                             try:
-                                rss_response = await client.get(rss_url, follow_redirects=True)
+                                rss_response = await diagnostic_get("rss_link", client, rss_url)
                                 if rss_response.status_code == 200:
                                     parsed = _parse_rss(rss_response.text, limit=effective_limit)
                                     if parsed:
@@ -123,16 +219,17 @@ async def discover_articles(
                                         source_type = "rss_link"
                                         source_url = rss_url
                                         break
-                            except Exception:
+                            except Exception as exc:
+                                warnings.append(_discovery_warning("rss_link", exc))
                                 continue
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.append(_discovery_warning("base", exc))
 
             if not articles:
                 for path in COMMON_RSS_PATHS:
                     probe_url = urllib.parse.urljoin(base_url, path)
                     try:
-                        response = await client.get(probe_url, follow_redirects=True)
+                        response = await diagnostic_get("rss_probe", client, probe_url)
                         if response.status_code == 200:
                             parsed = _parse_rss(response.text, limit=effective_limit)
                             if parsed:
@@ -140,14 +237,15 @@ async def discover_articles(
                                 source_type = "rss_probe"
                                 source_url = probe_url
                                 break
-                    except Exception:
+                    except Exception as exc:
+                        warnings.append(_discovery_warning("rss_probe", exc))
                         continue
 
             if not articles:
                 for path in COMMON_SITEMAP_PATHS:
                     probe_url = urllib.parse.urljoin(base_url, path)
                     try:
-                        response = await client.get(probe_url, follow_redirects=True)
+                        response = await diagnostic_get("sitemap_probe", client, probe_url)
                         if response.status_code == 200:
                             parsed = _parse_sitemap(response.text, limit=effective_limit)
                             if parsed:
@@ -155,14 +253,15 @@ async def discover_articles(
                                 source_type = "sitemap"
                                 source_url = probe_url
                                 break
-                    except Exception:
+                    except Exception as exc:
+                        warnings.append(_discovery_warning("sitemap_probe", exc))
                         continue
 
     domain = domain_from_url(target if target.startswith("http") else f"https://{target}")
     urls = [article["url"] for article in articles if article.get("url")]
     next_command = f"pac batch {' '.join(urls[:3])} --compact" if urls else "pac fetch <url>"
 
-    return {
+    result: dict[str, Any] = {
         "ok": len(articles) > 0,
         "domain": domain,
         "source_type": source_type,
@@ -170,7 +269,16 @@ async def discover_articles(
         "count": len(articles),
         "articles": articles[:effective_limit],
         "next_command": next_command,
+        "warnings": list(dict.fromkeys(warnings)),
     }
+    if diagnostics:
+        result["diagnostics"] = build_diagnostics(
+            request_id=diagnostic_request_id,
+            total_latency_ms=int((time.perf_counter() - started_at) * 1000),
+            attempts=diagnostic_attempts,
+            quality=None,
+        )
+    return result
 
 
 def is_google_news_url(url: str) -> bool:
@@ -456,30 +564,46 @@ def _parse_rss(xml_text: str, limit: int = 20) -> list[dict[str, str]]:
 
     articles: list[dict[str, str]] = []
     try:
-        clean_xml = re.sub(r' xmlns(:[a-zA-Z0-9]+)?="[^"]+"', "", xml_text, count=5)
-        root = ET.fromstring(clean_xml)
+        root = ET.fromstring((xml_text or "")[:DISCOVERY_MAX_PARSE_CHARS])
 
-        for item in root.findall(".//item"):
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            published = (item.findtext("pubDate") or "").strip()
+        def local_name(element: ET.Element) -> str:
+            return str(element.tag).rsplit("}", 1)[-1].casefold()
+
+        def child_text(element: ET.Element, *names: str) -> str:
+            wanted = {name.casefold() for name in names}
+            for child in list(element):
+                if local_name(child) in wanted:
+                    return (child.text or "").strip()
+            return ""
+
+        for item in (node for node in root.iter() if local_name(node) == "item"):
+            title = child_text(item, "title")
+            link = child_text(item, "link")
+            published = child_text(item, "pubDate")
             if link and link.startswith("http"):
                 articles.append({"title": title, "url": link, "published": published})
             if len(articles) >= limit:
                 break
 
         if not articles:
-            for entry in root.findall(".//entry"):
-                title = (entry.findtext("title") or "").strip()
-                link_element = entry.find("link")
-                link = link_element.attrib.get("href", "") if link_element is not None else ""
-                published = (entry.findtext("published") or entry.findtext("updated") or "").strip()
+            for entry in (node for node in root.iter() if local_name(node) == "entry"):
+                title = child_text(entry, "title")
+                link = ""
+                for child in list(entry):
+                    if local_name(child) != "link":
+                        continue
+                    rel = str(child.attrib.get("rel") or "alternate").casefold()
+                    href = str(child.attrib.get("href") or "").strip()
+                    if href and rel in {"", "alternate"}:
+                        link = href
+                        break
+                published = child_text(entry, "published", "updated")
                 if link and link.startswith("http"):
                     articles.append({"title": title, "url": link, "published": published})
                 if len(articles) >= limit:
                     break
-    except Exception:
-        pass
+    except (ET.ParseError, ValueError, TypeError):
+        return []
     return articles
 
 
@@ -488,31 +612,39 @@ def _parse_sitemap(xml_text: str, limit: int = 20) -> list[dict[str, str]]:
 
     articles: list[dict[str, str]] = []
     try:
-        clean_xml = re.sub(r' xmlns(:[a-zA-Z0-9]+)?="[^"]+"', "", xml_text, count=5)
-        root = ET.fromstring(clean_xml)
-        for url_element in root.findall(".//url"):
-            location = (url_element.findtext("loc") or "").strip()
-            last_modified = (url_element.findtext("lastmod") or "").strip()
+        root = ET.fromstring((xml_text or "")[:DISCOVERY_MAX_PARSE_CHARS])
+        for url_element in root.iter():
+            if str(url_element.tag).rsplit("}", 1)[-1].casefold() != "url":
+                continue
+            location = ""
+            last_modified = ""
+            for child in list(url_element):
+                name = str(child.tag).rsplit("}", 1)[-1].casefold()
+                if name == "loc":
+                    location = (child.text or "").strip()
+                elif name == "lastmod":
+                    last_modified = (child.text or "").strip()
             if location and location.startswith("http"):
                 articles.append({"title": "", "url": location, "published": last_modified})
             if len(articles) >= limit:
                 break
-    except Exception:
-        pass
+    except (ET.ParseError, ValueError, TypeError):
+        return []
     return articles
 
 
 def _extract_rss_links_from_html(html_text: str, base_url: str) -> list[str]:
     """Find RSS/Atom link tags inside HTML."""
 
+    from bs4 import BeautifulSoup
+
     links: list[str] = []
-    matches = re.findall(
-        r'<link[^>]+type=["\']application/(?:rss\+xml|atom\+xml)["\'][^>]*>',
-        html_text,
-        re.IGNORECASE,
-    )
-    for match in matches:
-        href_match = re.search(r'href=["\']([^"\']+)["\']', match, re.IGNORECASE)
-        if href_match:
-            links.append(urllib.parse.urljoin(base_url, href_match.group(1)))
+    soup = BeautifulSoup((html_text or "")[:DISCOVERY_MAX_PARSE_CHARS], "html.parser")
+    for element in soup.find_all("link"):
+        media_type = str(element.get("type") or "").casefold().strip()
+        if media_type not in {"application/rss+xml", "application/atom+xml"}:
+            continue
+        href = str(element.get("href") or "").strip()
+        if href:
+            links.append(urllib.parse.urljoin(base_url, href))
     return links

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from types import SimpleNamespace
 import pytest
 
@@ -195,7 +196,9 @@ def test_batch_out_dir_writes_only_successes_without_refetching(monkeypatch, tmp
 
     result = asyncio.run(cli._cmd_batch(args))
 
-    expected_path = tmp_path / "good-article" / "good-article.md"
+    suffix = hashlib.sha256(urls[0].encode("utf-8")).hexdigest()[:8]
+    slug = f"good-article-{suffix}"
+    expected_path = tmp_path / slug / f"{slug}.md"
     assert [url for url, _ in calls] == urls
     assert all(kwargs["full_markdown"] is True for _, kwargs in calls)
     assert expected_path.read_text(encoding="utf-8") == markdown
@@ -206,6 +209,24 @@ def test_batch_out_dir_writes_only_successes_without_refetching(monkeypatch, tmp
     assert result["results"][1]["path"] is None
     assert all("_image_urls" not in item for item in result["results"])
     assert list(tmp_path.rglob("*.md")) == [expected_path]
+
+
+def test_batch_short_markdown_is_not_reported_as_truncated(monkeypatch):
+    async def fake_fetch_article(*args, **kwargs):
+        return {"ok": True, "title": "Short", "markdown": "body", "truncated": False}
+
+    monkeypatch.setattr("bpc_fetch.strategy.fetch_article", fake_fetch_article)
+    monkeypatch.setattr(
+        "bpc_fetch.rules.store.get_sites_map_with_version",
+        lambda sites_js: ({}, "v", []),
+    )
+    args = SimpleNamespace(
+        urls=["https://example.com/a"], file=None, out_dir=None,
+        concurrency=1, max=10, allow_partial=False, full=False,
+        sites_js=None, no_rule_sync=True,
+    )
+    result = asyncio.run(cli._cmd_batch(args))
+    assert result["results"][0]["truncated"] is False
 
 
 def test_fetch_image_flags_share_one_default_false_destination(monkeypatch, capsys):

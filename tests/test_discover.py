@@ -1,5 +1,14 @@
+import asyncio
+
+import httpx
 import pytest
-from bpc_fetch.discover import _parse_rss, _parse_sitemap, _extract_rss_links_from_html
+
+from bpc_fetch.discover import (
+    _extract_rss_links_from_html,
+    _parse_rss,
+    _parse_sitemap,
+    _safe_get,
+)
 
 SAMPLE_RSS_2 = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -74,3 +83,31 @@ def test_parse_sitemap():
 def test_extract_rss_links():
     links = _extract_rss_links_from_html(SAMPLE_HTML_WITH_RSS, "https://example.com")
     assert links == ["https://example.com/feed.xml"]
+
+
+def test_safe_get_rejects_private_redirect_before_second_request():
+    requested = []
+
+    async def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "http://127.0.0.1/private"})
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(Exception, match="private_ip"):
+                await _safe_get(client, "https://8.8.8.8/start")
+
+    asyncio.run(exercise())
+    assert requested == ["https://8.8.8.8/start"]
+
+
+def test_safe_get_rejects_oversized_body():
+    async def handler(request):
+        return httpx.Response(200, content=b"12345")
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(RuntimeError, match="too large"):
+                await _safe_get(client, "https://8.8.8.8/feed", max_bytes=4)
+
+    asyncio.run(exercise())

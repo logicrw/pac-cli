@@ -1,7 +1,7 @@
 """Asynchronous chain-of-responsibility fetch pipeline for PAC-Engine.
 
 The module keeps the original public API and result envelope while replacing
-its monolithic waterfall with composable HTTP, stealth-browser, and archive
+its monolithic waterfall with composable HTTP, browser, and archive
 handlers.  Every successful candidate is validated by the structural quality
 gate before the pipeline short-circuits.
 """
@@ -29,10 +29,11 @@ from .quality import (
     QualityResult,
     classify_access_control_page,
     html_has_content,
-    html_looks_paywalled,
     quality_check,
 )
-from .result import classify_http_failure, fail_result, ok_result
+from .result import (
+    attach_diagnostics, classify_http_failure, fail_result, new_request_id, ok_result,
+)
 from .sites import SiteStrategy
 from .ssrf import SSRFBlocked, assert_public_url
 
@@ -52,7 +53,10 @@ TIMEOUT = 30.0
 GOOGLEBOT_TIMEOUT = 10.0
 MAX_REDIRECTS = 10
 CURL_CFFI_IMPERSONATE = os.environ.get("PAC_CURL_IMPERSONATE", "chrome").strip() or "chrome"
-ARCHIVE_IS_COOLDOWN_S = float(os.environ.get("PAC_ARCHIVE_COOLDOWN_S", "300"))
+try:
+    ARCHIVE_IS_COOLDOWN_S = max(0.0, float(os.environ.get("PAC_ARCHIVE_COOLDOWN_S", "300")))
+except ValueError:
+    ARCHIVE_IS_COOLDOWN_S = 300.0
 _archive_is_fail_at: dict[str, float] = {}
 ARCHIVE_TODAY_HOSTS = tuple(
     host.strip().lower()
@@ -471,7 +475,7 @@ class DirectHttpHandler(AsyncHandler):
 
 
 class StealthBrowserHandler(AsyncHandler):
-    """Playwright handler using stealth masks, resource blocking, and pooling."""
+    """Browser handler using the selected driver, resource blocking, and pooling."""
 
     async def process(self, context: Context) -> dict[str, Any] | None:
         if "browser_cleanup" not in context.options.plan:
@@ -1430,6 +1434,7 @@ async def fetch_page(
 
     last_text = ""
     last_status = 0
+    last_transport_error: Exception | None = None
     try:
         for proxy in proxy_candidates:
             current_url = url
@@ -1456,7 +1461,12 @@ async def fetch_page(
                     assert_public_url(current_url)
                 else:
                     raise RuntimeError("redirect limit exceeded")
-            except Exception:
+            except SSRFBlocked:
+                raise
+            except Exception as exc:
+                if managed_failover and proxy is not _AUTO_HTTP_PROXY and proxy is not None:
+                    last_transport_error = exc
+                    continue
                 raise
 
             if managed_failover and proxy is not _AUTO_HTTP_PROXY and proxy is not None:
@@ -1468,11 +1478,15 @@ async def fetch_page(
                     if error_code in {"BOT_CHALLENGE", "HTTP_BLOCKED"}:
                         breaker.mark_failure(proxy, error_code)
                         continue
+                    if error_code == "NETWORK":
+                        continue
                     if 200 <= last_status < 400:
                         breaker.mark_success(proxy)
                 except Exception:
                     pass
             return last_text, last_status
+        if last_transport_error is not None:
+            raise last_transport_error
         return last_text, last_status
     finally:
         if own_client:
@@ -1668,6 +1682,8 @@ async def fetch_article(
     force_archive: bool = False,
     full_markdown: bool = False,
     domain: str | None = None,
+    diagnostics: bool = False,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Fetch and extract an article through the asynchronous handler chain."""
 
@@ -1675,10 +1691,12 @@ async def fetch_article(
 
     started_at = time.perf_counter()
     resolved_domain = domain or domain_from_url(url)
+    diagnostic_request_id = (request_id or new_request_id()) if diagnostics else ""
     try:
         assert_public_url(url)
     except SSRFBlocked as exc:
-        return fail_result(
+        elapsed = int((time.perf_counter() - started_at) * 1000)
+        result = fail_result(
             url=url,
             domain=resolved_domain,
             error_code="SSRF_BLOCKED",
@@ -1686,8 +1704,25 @@ async def fetch_article(
             error=str(exc),
             strategy_hit=[],
             rule_version=rule_version,
-            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            latency_ms=elapsed,
         )
+        if diagnostics:
+            attach_diagnostics(
+                result,
+                request_id=diagnostic_request_id,
+                total_latency_ms=elapsed,
+                attempts=[{
+                    "handler": "SSRFGuard",
+                    "label": "initial_url",
+                    "engine": "validation",
+                    "status": 0,
+                    "elapsed_ms": elapsed,
+                    "error_code": "SSRF_BLOCKED",
+                    "error": str(exc),
+                    "quality_reason": "",
+                }],
+            )
+        return result
 
     plan = tuple(
         plan_execution_steps(
@@ -1721,16 +1756,33 @@ async def fetch_article(
     try:
         pipeline = _build_pipeline(plan)
         result = await pipeline.run(context)
-        if result is not None:
-            return result
-        return context.failure_result()
+        if result is None:
+            result = context.failure_result()
+        if diagnostics:
+            attach_diagnostics(
+                result,
+                request_id=diagnostic_request_id,
+                total_latency_ms=context.elapsed_ms(),
+                attempts=context.attempts,
+                quality=context.last_quality,
+            )
+        return result
     except SSRFBlocked as exc:
         context.note_failure(
             "SSRF_BLOCKED",
             error=str(exc),
             failure_class="config",
         )
-        return context.failure_result()
+        result = context.failure_result()
+        if diagnostics:
+            attach_diagnostics(
+                result,
+                request_id=diagnostic_request_id,
+                total_latency_ms=context.elapsed_ms(),
+                attempts=context.attempts,
+                quality=context.last_quality,
+            )
+        return result
     except Exception as exc:
         context.note_failure(
             "INTERNAL",
@@ -1738,7 +1790,16 @@ async def fetch_article(
             failure_class="config",
             engine=context.last_engine,
         )
-        return context.failure_result()
+        result = context.failure_result()
+        if diagnostics:
+            attach_diagnostics(
+                result,
+                request_id=diagnostic_request_id,
+                total_latency_ms=context.elapsed_ms(),
+                attempts=context.attempts,
+                quality=context.last_quality,
+            )
+        return result
     finally:
         if own_client:
             await _close_async_client(active_client)

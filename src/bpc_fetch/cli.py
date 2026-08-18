@@ -3,14 +3,32 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
-from .result import BATCH_SUMMARY_CHARS, truncate_markdown
+from .result import (
+    BATCH_SUMMARY_CHARS, aggregate_diagnostics, build_diagnostics, new_request_id, truncate_markdown,
+)
 from .sites import SITES_JS_DEFAULT, domain_from_url
+
+
+def _attach_command_diagnostics(
+    result: dict,
+    *,
+    enabled: bool,
+    request_id: str,
+    started_at: float,
+) -> dict:
+    if enabled and "diagnostics" not in result:
+        result["diagnostics"] = build_diagnostics(
+            request_id=request_id or new_request_id(),
+            total_latency_ms=int((time.perf_counter() - started_at) * 1000),
+        )
+    return result
 
 
 def main():
@@ -55,6 +73,7 @@ def main():
     p_fetch.add_argument("--use-browser", action="store_true", default=None)
     p_fetch.add_argument("--no-browser", action="store_true")
     p_fetch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
+    p_fetch.add_argument("--diagnostics", action="store_true", help="Include structured attempt and quality diagnostics")
 
     p_batch = sub.add_parser("batch", help="Batch fetch (default summary only)", parents=[_common])
     p_batch.add_argument("urls", nargs="*", help="URLs")
@@ -65,11 +84,13 @@ def main():
     p_batch.add_argument("--allow-partial", action="store_true")
     p_batch.add_argument("--full", action="store_true")
     p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
+    p_batch.add_argument("--diagnostics", action="store_true", help="Include structured attempt and quality diagnostics")
 
     p_discover = sub.add_parser("discover", help="Discover recent articles from domain or RSS", parents=[_common])
     p_discover.add_argument("target", help="Domain, RSS URL, or news topic query")
     p_discover.add_argument("--query", "-q", type=str, default=None, help="Search keyword filter")
     p_discover.add_argument("--limit", type=int, default=20, help="Max articles to discover")
+    p_discover.add_argument("--diagnostics", action="store_true", help="Include structured discovery diagnostics")
 
     sub.add_parser("install-browser", help="Install Playwright Chromium", parents=[_common])
 
@@ -87,10 +108,11 @@ def main():
         parser.print_help()
         sys.exit(1)
 
+    command_started_at = time.perf_counter()
     try:
         result = asyncio.run(_dispatch(args))
         print(json.dumps(result, ensure_ascii=False, indent=None if args.compact else 2))
-        if not result.get("ok", True) and args.command in ("fetch",):
+        if not result.get("ok", True):
             sys.exit(1)
     except KeyboardInterrupt:
         sys.exit(130)
@@ -103,6 +125,12 @@ def main():
             "strategy_hit": [],
             "recovery_hint": "pac doctor --compact",
         }
+        _attach_command_diagnostics(
+            err,
+            enabled=bool(getattr(args, "diagnostics", False)),
+            request_id="",
+            started_at=command_started_at,
+        )
         print(json.dumps(err))
         sys.exit(1)
 
@@ -292,6 +320,8 @@ async def _cmd_fetch(args) -> dict:
     from .strategy import fetch_article
 
     t0 = time.perf_counter()
+    diagnostics_enabled = bool(getattr(args, "diagnostics", False))
+    request_id = new_request_id() if diagnostics_enabled else ""
     sites_js = getattr(args, "sites_js", None)
     with swr_nonblocking_mode():
         sync_result = maybe_sync_rules(
@@ -319,6 +349,8 @@ async def _cmd_fetch(args) -> dict:
         full_markdown=bool(getattr(args, "full", False) or args.out_dir),
         use_browser=use_browser,
         domain=domain,
+        diagnostics=diagnostics_enabled,
+        request_id=request_id or None,
     )
     image_urls = result.pop("_image_urls", [])
     result["warnings"] = list(dict.fromkeys(list(result.get("warnings") or []) + list(warnings)))
@@ -345,11 +377,25 @@ async def _cmd_fetch(args) -> dict:
         if not getattr(args, "full", False):
             result["markdown"], result["truncated"] = truncate_markdown(markdown)
 
+    if diagnostics_enabled:
+        total_latency_ms = int((time.perf_counter() - t0) * 1000)
+        diagnostics = result.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            diagnostics["request_id"] = request_id
+            diagnostics["total_latency_ms"] = total_latency_ms
+        else:
+            result["diagnostics"] = build_diagnostics(
+                request_id=request_id, total_latency_ms=total_latency_ms
+            )
     return result
 
 
 async def _cmd_batch(args) -> dict:
     import asyncio as aio
+
+    started_at = time.perf_counter()
+    diagnostics_enabled = bool(getattr(args, "diagnostics", False))
+    batch_request_id = new_request_id() if diagnostics_enabled else ""
 
     from .rules.store import get_sites_map_with_version
     from .rules.sync import maybe_sync_rules, swr_nonblocking_mode
@@ -372,24 +418,27 @@ async def _cmd_batch(args) -> dict:
             for line in args.file.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.startswith("#")
         )
-    hard_cap = min(int(os.environ.get("PAC_BATCH_HARD_CAP", "25")), 25)
+    try:
+        hard_cap = min(max(1, int(os.environ.get("PAC_BATCH_HARD_CAP", "25"))), 25)
+    except ValueError:
+        hard_cap = 25
     max_n = min(args.max or 10, hard_cap)
     if len(urls) > max_n:
-        return {
+        return _attach_command_diagnostics({
             "ok": False,
             "error_code": "LIMIT_EXCEEDED",
             "failure_class": "config",
             "error": f"url count {len(urls)} > max {max_n}",
             "strategy_hit": [],
-        }
+        }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
     if not urls:
-        return {
+        return _attach_command_diagnostics({
             "ok": False,
             "error_code": "INTERNAL",
             "failure_class": "config",
             "error": "no URLs",
             "strategy_hit": [],
-        }
+        }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
 
     sites_js = getattr(args, "sites_js", None)
     with swr_nonblocking_mode():
@@ -398,10 +447,19 @@ async def _cmd_batch(args) -> dict:
         )
     sites, ver, warnings = get_sites_map_with_version(sites_js)
     warnings = list(dict.fromkeys(list(sync_result.get("warnings") or []) + list(warnings)))
-    sem = aio.Semaphore(args.concurrency or 2)
+    concurrency = int(args.concurrency or 2)
+    if concurrency < 1 or concurrency > hard_cap:
+        return _attach_command_diagnostics({
+            "ok": False,
+            "error_code": "LIMIT_EXCEEDED",
+            "failure_class": "config",
+            "error": f"concurrency must be between 1 and {hard_cap}",
+            "strategy_hit": [],
+        }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
+    sem = aio.Semaphore(concurrency)
     results = []
 
-    async def one(u: str) -> dict:
+    async def one(index: int, u: str) -> dict:
         async with sem:
             domain = domain_from_url(u)
             st = sites.get(domain)
@@ -412,23 +470,30 @@ async def _cmd_batch(args) -> dict:
                 rule_version=ver,
                 full_markdown=bool(args.full or args.out_dir),
                 domain=domain,
+                diagnostics=diagnostics_enabled,
+                request_id=(f"{batch_request_id}-{index + 1}" if diagnostics_enabled else None),
             )
             r.pop("_image_urls", None)
             markdown = r.get("markdown") or ""
             if r.get("ok") and args.out_dir:
-                slug = _slugify(r.get("title") or domain)
+                # Batch output must be deterministic and collision-safe even
+                # when two articles have the same headline.
+                base_slug = _slugify(r.get("title") or domain)
+                url_hash = hashlib.sha256(u.encode("utf-8")).hexdigest()[:8]
+                slug = f"{base_slug[:71]}-{url_hash}"
                 md_path = Path(args.out_dir) / slug / f"{slug}.md"
                 md_path.parent.mkdir(parents=True, exist_ok=True)
                 md_path.write_text(markdown, encoding="utf-8")
                 r["path"] = str(md_path)
             if not args.full:
-                r["markdown"], _ = truncate_markdown(markdown, BATCH_SUMMARY_CHARS)
-                r["truncated"] = True
+                r["markdown"], r["truncated"] = truncate_markdown(
+                    markdown, BATCH_SUMMARY_CHARS
+                )
             return r
 
-    results = list(await aio.gather(*[one(u) for u in urls]))
+    results = list(await aio.gather(*[one(index, u) for index, u in enumerate(urls)]))
     success = sum(1 for r in results if r.get("ok"))
-    return {
+    result: dict = {
         "ok": True,
         "total": len(urls),
         "success": success,
@@ -437,26 +502,50 @@ async def _cmd_batch(args) -> dict:
         "warnings": warnings,
         "results": results,
     }
+    if diagnostics_enabled:
+        result["diagnostics"] = aggregate_diagnostics(
+            request_id=batch_request_id,
+            total_latency_ms=int((time.perf_counter() - started_at) * 1000),
+            items=zip(urls, results),
+        )
+    return result
 
 
 async def _cmd_discover(args) -> dict:
     from .discover import discover_articles
 
+    diagnostics_enabled = bool(getattr(args, "diagnostics", False))
     return await discover_articles(
         args.target,
         limit=getattr(args, "limit", 20),
         search_query=getattr(args, "query", None),
+        diagnostics=diagnostics_enabled,
+        request_id=new_request_id() if diagnostics_enabled else None,
     )
 
 
 def _cmd_install_browser(args) -> dict:
     import subprocess
 
-    r = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        timeout = max(30, int(os.environ.get("PAC_INSTALL_BROWSER_TIMEOUT_S", "600")))
+    except ValueError:
+        timeout = 600
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "error_code": "BROWSER_UNAVAILABLE",
+            "failure_class": "config",
+            "error": f"browser installation timed out after {timeout}s",
+            "strategy_hit": [],
+        }
     if r.returncode == 0:
         return {"ok": True, "message": "Chromium installed"}
     return {
@@ -495,7 +584,13 @@ async def _cmd_rules(args) -> dict:
         if not st:
             # try suffix match
             for d, s in sites.items():
-                if domain.endswith(d) or d.endswith(domain):
+                normalized = domain.casefold().removeprefix("www.").rstrip(".")
+                rule_domain = d.casefold().removeprefix("www.").rstrip(".")
+                if (
+                    normalized == rule_domain
+                    or normalized.endswith("." + rule_domain)
+                    or rule_domain.endswith("." + normalized)
+                ):
                     st = s
                     domain = d
                     break

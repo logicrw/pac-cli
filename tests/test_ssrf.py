@@ -41,10 +41,33 @@ def test_fake_ip_bypass(monkeypatch):
     assert_public_url("https://example.com/")
 
 
-def test_proxy_env_bypass(monkeypatch):
-    """配置代理时 hostname 不经本地 DNS 检查。"""
+def test_proxy_env_still_checks_private_dns(monkeypatch):
+    """A proxy env var must not disable hostname SSRF validation."""
+    import socket
+
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
-    assert_public_url("https://example.com/")
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))
+        ],
+    )
+    with pytest.raises(SSRFBlocked, match="resolves_private"):
+        assert_public_url("https://internal.example/")
+
+
+def test_proxy_remote_dns_requires_explicit_opt_in(monkeypatch):
+    import socket
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("PAC_SSRF_TRUST_PROXY_DNS", "1")
+
+    def fail_dns(*args, **kwargs):
+        raise socket.gaierror("local DNS unavailable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fail_dns)
+    assert_public_url("https://public-via-proxy.example/")
 
 
 def test_ssrf_off_switch(monkeypatch):
