@@ -9,5 +9,9 @@ Site bypass rules and strategy data originate from Bypass Paywalls Clean (MIT Li
   https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean
   Copyright (c) magnolia1234 and contributors
 
+Vendored Public Suffix List data is sourced from publicsuffix.org (Mozilla Public License 2.0)
+  https://publicsuffix.org/list/public_suffix_list.dat
+  Snapshot: 2026-08-17_18-44-50_UTC (commit fe5aa073ba579b9d5ae92958b63a7d1de8c13e3a)
+
 This software is provided for educational and personal research purposes, AS IS,
 without warranty of any kind.

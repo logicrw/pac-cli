@@ -62,3 +62,32 @@ def test_proxy_pool_and_circuit_breaker(monkeypatch):
     active_proxy2 = resolve_proxy("https://www.wsj.com/article", None)
     assert active_proxy2 is not None
     assert active_proxy2.server == "http://proxy1:8080"
+
+
+def test_malformed_proxy_port_is_ignored():
+    from bpc_fetch.browser import _normalize_proxy
+
+    assert _normalize_proxy("http://proxy.example:not-a-port") is None
+
+
+def test_browser_proxy_pool_rotates_on_network_failure(monkeypatch):
+    from bpc_fetch import browser
+
+    p1 = browser.ProxySettings("http://proxy1:8080")
+    p2 = browser.ProxySettings("http://proxy2:8080")
+    calls = []
+
+    monkeypatch.setattr(browser, "resolve_proxy_candidates", lambda *a, **k: [p1, p2])
+
+    async def fake_single(url, strategy, pool=None, *, proxy_override):
+        calls.append(proxy_override.server)
+        if proxy_override == p1:
+            return browser.BrowserResult(ok=False, error_code="NETWORK", error_msg="connect failed")
+        return browser.BrowserResult(ok=True, html="ok", status=200)
+
+    monkeypatch.setattr(browser, "_fetch_for_strategy_single", fake_single)
+    result = asyncio.run(browser.fetch_for_strategy("https://example.com", None))
+
+    assert result.ok is True
+    assert calls == ["http://proxy1:8080", "http://proxy2:8080"]
+    assert result.proxy_attempts == 2

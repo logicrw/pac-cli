@@ -6,8 +6,8 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 import trafilatura
-from markdownify import markdownify
 
+from .quality import clean_paywall_text
 from .ssrf import assert_public_url
 from .strategy import UA_NORMAL, TIMEOUT
 
@@ -23,7 +23,7 @@ def extract_article(html: str, url: str, dom_result: dict | None = None) -> dict
             "title": dom_result.get("title", ""),
             "author": "",
             "date": "",
-            "text": dom_result["text"],
+            "text": clean_paywall_text(dom_result["text"]),
             "images": images,
             "url": url,
         }
@@ -52,7 +52,7 @@ def extract_article(html: str, url: str, dom_result: dict | None = None) -> dict
     date = _extract_date(metadata)
     images = _extract_image_urls(html, url)
 
-    md_content = _clean_paywall_text(result or "")
+    md_content = clean_paywall_text(result or "")
 
     return {
         "title": title,
@@ -80,13 +80,6 @@ def article_to_markdown(article: dict, images_dir: str = "images") -> str:
     lines.append("")
 
     text = article["text"]
-
-    # Strip paywall markers from text
-    for marker in ["Enjoying our latest content?", "Log in or create an account to continue",
-                   "Subscribe to continue reading", "Already a subscriber?"]:
-        idx = text.find(marker)
-        if idx > 0:
-            text = text[:idx].rstrip()
 
     # Embed first image as hero, rest at end
     if article.get("images"):
@@ -230,28 +223,3 @@ def _image_filename(url: str, index: int) -> str:
 
 def _escape_yaml(s: str) -> str:
     return s.replace('"', '\\"').replace("\n", " ")
-
-
-def _clean_paywall_text(text: str) -> str:
-    """Remove paywall/login prompts that leak into extracted text."""
-    markers = [
-        "Enjoying our latest content?",
-        "Log in or create an account to continue",
-        "Subscribe to continue reading",
-        "Already a subscriber? Sign in",
-        "Sign in to continue",
-        "Create a free account to continue",
-        "Register for free to continue reading",
-        "Want to read more?",
-        "Access the most recent journalism",
-        "Explore the latest features & opinion",
-    ]
-    for marker in markers:
-        idx = text.find(marker)
-        if idx > 0:
-            text = text[:idx].rstrip()
-    # Also strip trailing "or" / login button text
-    for tail in ["\nor\n", "\nor", "\nSign in", "\nLog in", "\nSubscribe"]:
-        if text.endswith(tail):
-            text = text[:-len(tail)].rstrip()
-    return text

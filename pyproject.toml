@@ -12,7 +12,6 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "trafilatura>=2.0",
-    "markdownify>=0.14",
     "beautifulsoup4>=4.12",
     "playwright>=1.40",
     "platformdirs>=4.0",
@@ -22,7 +21,9 @@ dependencies = [
 stealth = ["curl_cffi>=0.7.0", "camoufox>=0.4.0"]
 patchright = ["patchright>=1.0"]
 eval = ["PyYAML>=6.0"]
-all = ["curl_cffi>=0.7.0", "camoufox>=0.4.0", "PyYAML>=6.0"]
+test = ["pytest>=8.0", "PyYAML>=6.0"]
+dev = ["pytest>=8.0", "PyYAML>=6.0", "hatch>=1.12", "build>=1.2"]
+all = ["curl_cffi>=0.7.0", "camoufox>=0.4.0", "patchright>=1.0", "PyYAML>=6.0"]
 
 [project.scripts]
 pac = "bpc_fetch.cli:main"
@@ -38,3 +39,4 @@ packages = ["src/bpc_fetch"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "data/sites.js" = "bpc_fetch/data/sites.js"
+"src/bpc_fetch/data/public_suffix_list.dat" = "bpc_fetch/data/public_suffix_list.dat"

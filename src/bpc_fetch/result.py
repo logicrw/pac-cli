@@ -1,7 +1,9 @@
 """Unified ArticleResult envelope and error codes (Phase 1 / §15)."""
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import asdict, is_dataclass
+from typing import Any, Iterable, Mapping
+import uuid
 
 # §15.3 A5
 ERROR_CODES = frozenset({
@@ -146,3 +148,147 @@ def classify_http_failure(status: int, body: str = "") -> tuple[str, str]:
         # 拿到 200 却走到失败分类：内容不可用（无正文/预筛不过），不是封锁
         return "EXTRACT_FAILED", "extract"
     return "HTTP_BLOCKED", "strategy"
+
+def new_request_id() -> str:
+    """Return a collision-resistant request identifier for opt-in diagnostics."""
+
+    return uuid.uuid4().hex
+
+
+def _attempt_mapping(attempt: Any) -> dict[str, Any]:
+    if isinstance(attempt, Mapping):
+        raw = dict(attempt)
+    elif is_dataclass(attempt) and not isinstance(attempt, type):
+        raw = asdict(attempt)
+    else:
+        raw = {
+            key: getattr(attempt, key)
+            for key in (
+                "handler", "label", "engine", "status", "elapsed_ms",
+                "error_code", "error", "quality_reason",
+            )
+            if hasattr(attempt, key)
+        }
+    return {
+        "handler": str(raw.get("handler") or ""),
+        "label": str(raw.get("label") or ""),
+        "engine": str(raw.get("engine") or ""),
+        "status": int(raw.get("status") or 0),
+        "elapsed_ms": max(0, int(raw.get("elapsed_ms") or 0)),
+        "error_code": str(raw.get("error_code") or ""),
+        "error": str(raw.get("error") or "")[:500],
+        "quality_reason": str(raw.get("quality_reason") or ""),
+    }
+
+
+def _quality_diagnostics(quality: Any | None) -> dict[str, Any]:
+    if quality is None:
+        return {
+            "evaluated": False,
+            "ok": None,
+            "score": None,
+            "reason": "",
+            "paywall_suspected": False,
+            "components": {},
+        }
+    metrics = getattr(quality, "metrics", {})
+    if not isinstance(metrics, Mapping):
+        metrics = {}
+    score = getattr(quality, "score", None)
+    return {
+        "evaluated": True,
+        "ok": bool(getattr(quality, "ok", False)),
+        "score": float(score) if isinstance(score, (int, float)) else None,
+        "reason": str(getattr(quality, "reason", "") or ""),
+        "paywall_suspected": bool(getattr(quality, "paywall_suspected", False)),
+        "components": dict(metrics),
+    }
+
+
+def build_diagnostics(
+    *,
+    request_id: str,
+    total_latency_ms: int,
+    attempts: Iterable[Any] = (),
+    quality: Any | None = None,
+) -> dict[str, Any]:
+    """Build the stable, opt-in diagnostics schema used by fetch/discover/batch."""
+
+    history = [_attempt_mapping(attempt) for attempt in attempts]
+    engine_timings: dict[str, int] = {}
+    for attempt in history:
+        engine = attempt["engine"] or "unknown"
+        engine_timings[engine] = engine_timings.get(engine, 0) + attempt["elapsed_ms"]
+    return {
+        "request_id": request_id or new_request_id(),
+        "total_latency_ms": max(0, int(total_latency_ms)),
+        "engine_timings_ms": engine_timings,
+        "attempts": history,
+        "quality": _quality_diagnostics(quality),
+    }
+
+
+def attach_diagnostics(
+    result: dict[str, Any],
+    *,
+    request_id: str,
+    total_latency_ms: int,
+    attempts: Iterable[Any] = (),
+    quality: Any | None = None,
+) -> dict[str, Any]:
+    """Attach diagnostics without changing the default result envelope."""
+
+    result["diagnostics"] = build_diagnostics(
+        request_id=request_id,
+        total_latency_ms=total_latency_ms,
+        attempts=attempts,
+        quality=quality,
+    )
+    return result
+
+
+def aggregate_diagnostics(
+    *,
+    request_id: str,
+    total_latency_ms: int,
+    items: Iterable[tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    """Aggregate child diagnostics for batch commands without losing per-URL detail."""
+
+    engine_timings: dict[str, int] = {}
+    attempts: list[dict[str, Any]] = []
+    quality_items: list[dict[str, Any]] = []
+    for scope, result in items:
+        diagnostics = result.get("diagnostics")
+        if not isinstance(diagnostics, Mapping):
+            continue
+        for engine, elapsed in dict(diagnostics.get("engine_timings_ms") or {}).items():
+            engine_timings[str(engine)] = engine_timings.get(str(engine), 0) + max(0, int(elapsed or 0))
+        child_request_id = str(diagnostics.get("request_id") or "")
+        for attempt in diagnostics.get("attempts") or []:
+            normalized = _attempt_mapping(attempt)
+            normalized["scope"] = scope
+            normalized["request_id"] = child_request_id
+            attempts.append(normalized)
+        quality = diagnostics.get("quality")
+        if isinstance(quality, Mapping):
+            quality_items.append({
+                "scope": scope,
+                "request_id": child_request_id,
+                "evaluated": bool(quality.get("evaluated")),
+                "ok": quality.get("ok"),
+                "score": quality.get("score"),
+                "reason": str(quality.get("reason") or ""),
+                "paywall_suspected": bool(quality.get("paywall_suspected")),
+                "components": dict(quality.get("components") or {}),
+            })
+    return {
+        "request_id": request_id or new_request_id(),
+        "total_latency_ms": max(0, int(total_latency_ms)),
+        "engine_timings_ms": engine_timings,
+        "attempts": attempts,
+        "quality": {
+            "evaluated": any(item["evaluated"] for item in quality_items),
+            "items": quality_items,
+        },
+    }

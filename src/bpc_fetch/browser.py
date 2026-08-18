@@ -1,13 +1,12 @@
-"""Stealth Playwright driver, proxy resolver, context pool, and rate limiter.
+"""Browser drivers, proxy resolver, context pool, and rate limiter.
 
-The module preserves the original public functions while providing reusable
-per-domain browser contexts, deterministic fingerprint masking, resource
-interception, proxy selection, and access-control classification.
+Camoufox provides the optional native anti-detect path. Plain Playwright is a
+deterministic JavaScript-rendering fallback; PAC does not inject handcrafted
+fingerprint shims.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -40,19 +39,35 @@ except ImportError:  # stable camoufox releases may not expose this helper
 
 from .quality import classify_access_control_page
 from .sites import SiteStrategy
+from .ssrf import SSRFBlocked, assert_public_url
 
-BROWSER_TIMEOUT = int(os.environ.get("PAC_BROWSER_TIMEOUT_MS", "30000"))
-ARTICLE_WAIT_TIMEOUT = int(os.environ.get("PAC_BROWSER_ARTICLE_WAIT_MS", "8000"))
-BROWSER_SETTLE_MS = int(os.environ.get("PAC_BROWSER_SETTLE_MS", "1200"))
-DEFAULT_MAX_CONTEXTS = max(1, int(os.environ.get("PAC_BROWSER_MAX_CONTEXTS", "3")))
-DEFAULT_CONTEXT_IDLE_SECONDS = max(
-    0.0, float(os.environ.get("PAC_BROWSER_CONTEXT_IDLE_SECONDS", "180"))
-)
-DEFAULT_DOMAIN_CONCURRENCY = max(1, int(os.environ.get("PAC_DOMAIN_CONCURRENCY", "2")))
-DEFAULT_DOMAIN_RATE = max(0.01, float(os.environ.get("PAC_DOMAIN_RATE_PER_SECOND", "1.0")))
-DEFAULT_DOMAIN_BURST = max(1.0, float(os.environ.get("PAC_DOMAIN_BURST", "2")))
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value) if minimum is not None else value
+
+
+def _env_float(name: str, default: float, *, minimum: float | None = None) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value) if minimum is not None else value
+
+
+BROWSER_TIMEOUT = _env_int("PAC_BROWSER_TIMEOUT_MS", 30_000, minimum=1_000)
+ARTICLE_WAIT_TIMEOUT = _env_int("PAC_BROWSER_ARTICLE_WAIT_MS", 8_000, minimum=0)
+BROWSER_SETTLE_MS = _env_int("PAC_BROWSER_SETTLE_MS", 1_200, minimum=0)
+DEFAULT_MAX_CONTEXTS = _env_int("PAC_BROWSER_MAX_CONTEXTS", 3, minimum=1)
+DEFAULT_CONTEXT_IDLE_SECONDS = _env_float("PAC_BROWSER_CONTEXT_IDLE_SECONDS", 180.0, minimum=0.0)
+DEFAULT_DOMAIN_CONCURRENCY = _env_int("PAC_DOMAIN_CONCURRENCY", 2, minimum=1)
+DEFAULT_DOMAIN_RATE = _env_float("PAC_DOMAIN_RATE_PER_SECOND", 1.0, minimum=0.01)
+DEFAULT_DOMAIN_BURST = _env_float("PAC_DOMAIN_BURST", 2.0, minimum=1.0)
 DEFAULT_BROWSER_DRIVER = os.environ.get("PAC_BROWSER_DRIVER", "auto").strip().casefold() or "auto"
-DEFAULT_PROXY_COOLDOWN_SECONDS = max(1.0, float(os.environ.get("PAC_PROXY_COOLDOWN_S", "300")))
+DEFAULT_PROXY_COOLDOWN_SECONDS = _env_float("PAC_PROXY_COOLDOWN_S", 300.0, minimum=1.0)
 
 _TRACKING_DOMAIN_SUFFIXES = (
     "doubleclick.net",
@@ -125,214 +140,6 @@ _LAUNCH_ARGS = (
     "--use-mock-keychain",
 )
 
-_STEALTH_SCRIPT_BODY = r"""
-const define = (target, property, descriptor) => {
-    try {
-        Object.defineProperty(target, property, Object.assign({configurable: true}, descriptor));
-    } catch (_) {
-        return false;
-    }
-    return true;
-};
-
-const nativeToString = Function.prototype.toString;
-const nativeSources = new WeakMap();
-const markNative = (fn, name) => {
-    try {
-        nativeSources.set(fn, `function ${name || fn.name || ''}() { [native code] }`);
-    } catch (_) {
-        return fn;
-    }
-    return fn;
-};
-
-const patchedToString = markNative(function toString() {
-    if (typeof this === 'function' && nativeSources.has(this)) {
-        return nativeSources.get(this);
-    }
-    return nativeToString.call(this);
-}, 'toString');
-
-define(Function.prototype, 'toString', {
-    value: patchedToString,
-    writable: true,
-    enumerable: false
-});
-
-const navigatorPrototype = Object.getPrototypeOf(navigator);
-define(navigatorPrototype, 'webdriver', {get: markNative(function webdriver() { return undefined; }, 'get webdriver')});
-define(navigatorPrototype, 'platform', {get: markNative(function platform() { return cfg.platform; }, 'get platform')});
-define(navigatorPrototype, 'hardwareConcurrency', {get: markNative(function hardwareConcurrency() { return cfg.hardwareConcurrency; }, 'get hardwareConcurrency')});
-define(navigatorPrototype, 'deviceMemory', {get: markNative(function deviceMemory() { return cfg.deviceMemory; }, 'get deviceMemory')});
-define(navigatorPrototype, 'languages', {get: markNative(function languages() { return cfg.languages.slice(); }, 'get languages')});
-define(navigatorPrototype, 'language', {get: markNative(function language() { return cfg.languages[0]; }, 'get language')});
-
-const pluginEntries = [
-    {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'},
-    {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
-    {name: 'Native Client', filename: 'internal-nacl-plugin', description: ''}
-];
-const plugins = pluginEntries.map((entry, index) => {
-    const plugin = Object.create(Plugin.prototype);
-    define(plugin, 'name', {value: entry.name, enumerable: true});
-    define(plugin, 'filename', {value: entry.filename, enumerable: true});
-    define(plugin, 'description', {value: entry.description, enumerable: true});
-    define(plugin, 'length', {value: index === 0 ? 2 : 0, enumerable: true});
-    return plugin;
-});
-define(plugins, 'item', {value: markNative(function item(index) { return this[index] || null; }, 'item')});
-define(plugins, 'namedItem', {value: markNative(function namedItem(name) { return this.find(plugin => plugin.name === name) || null; }, 'namedItem')});
-define(plugins, 'refresh', {value: markNative(function refresh() { return undefined; }, 'refresh')});
-define(plugins, Symbol.toStringTag, {value: 'PluginArray'});
-define(navigatorPrototype, 'plugins', {get: markNative(function pluginsGetter() { return plugins; }, 'get plugins')});
-
-if (!window.chrome) {
-    define(window, 'chrome', {value: {}, writable: false, enumerable: true});
-}
-if (!window.chrome.runtime) {
-    const runtime = {
-        OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
-        OnRestartRequiredReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic'},
-        PlatformArch: {ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
-        RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
-        connect: markNative(function connect() { return {name: '', onDisconnect: {addListener() {}}, onMessage: {addListener() {}}, postMessage() {}}; }, 'connect'),
-        sendMessage: markNative(function sendMessage() { return Promise.resolve(undefined); }, 'sendMessage')
-    };
-    define(window.chrome, 'runtime', {value: runtime, enumerable: true});
-}
-if (!window.chrome.app) {
-    define(window.chrome, 'app', {value: {isInstalled: false, InstallState: {DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed'}, RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}}, enumerable: true});
-}
-
-if (navigator.permissions && navigator.permissions.query) {
-    const originalPermissionsQuery = navigator.permissions.query.bind(navigator.permissions);
-    const permissionsQuery = markNative(function query(parameters) {
-        const name = parameters && parameters.name;
-        if (name === 'notifications') {
-            const state = typeof Notification !== 'undefined' ? Notification.permission : 'default';
-            return Promise.resolve({state, onchange: null, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; }});
-        }
-        return originalPermissionsQuery(parameters);
-    }, 'query');
-    define(Object.getPrototypeOf(navigator.permissions), 'query', {value: permissionsQuery, writable: true});
-}
-
-const patchWebGL = (prototype) => {
-    if (!prototype || !prototype.getParameter) return;
-    const originalGetParameter = prototype.getParameter;
-    const getParameter = markNative(function getParameter(parameter) {
-        if (parameter === 37445) return cfg.webglVendor;
-        if (parameter === 37446) return cfg.webglRenderer;
-        return originalGetParameter.call(this, parameter);
-    }, 'getParameter');
-    define(prototype, 'getParameter', {value: getParameter, writable: true});
-};
-patchWebGL(window.WebGLRenderingContext && WebGLRenderingContext.prototype);
-patchWebGL(window.WebGL2RenderingContext && WebGL2RenderingContext.prototype);
-
-const noise = (x, y, channel) => {
-    let value = (cfg.seed ^ Math.imul((x + 1), 73856093) ^ Math.imul((y + 1), 19349663) ^ Math.imul((channel + 1), 83492791)) >>> 0;
-    value ^= value << 13;
-    value ^= value >>> 17;
-    value ^= value << 5;
-    return (value & 1) === 0 ? -1 : 1;
-};
-
-if (window.CanvasRenderingContext2D) {
-    const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-    const getImageData = markNative(function getImageData(sx, sy, sw, sh, settings) {
-        const imageData = originalGetImageData.call(this, sx, sy, sw, sh, settings);
-        const data = imageData && imageData.data;
-        if (data && data.length >= 4) {
-            const pixelCount = Math.max(1, Math.floor(data.length / 4));
-            const sampleCount = Math.min(8, pixelCount);
-            for (let index = 0; index < sampleCount; index += 1) {
-                const pixel = (Math.imul(cfg.seed + index + 1, 2654435761) >>> 0) % pixelCount;
-                const offset = pixel * 4;
-                for (let channel = 0; channel < 3; channel += 1) {
-                    data[offset + channel] = Math.max(0, Math.min(255, data[offset + channel] + noise(sx + pixel, sy + index, channel)));
-                }
-            }
-        }
-        return imageData;
-    }, 'getImageData');
-    define(CanvasRenderingContext2D.prototype, 'getImageData', {value: getImageData, writable: true});
-
-    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    const toDataURL = markNative(function toDataURL() {
-        try {
-            const context = this.getContext('2d');
-            if (!context || this.width < 1 || this.height < 1) {
-                return originalToDataURL.apply(this, arguments);
-            }
-            const x = (cfg.seed >>> 3) % this.width;
-            const y = (cfg.seed >>> 7) % this.height;
-            const original = originalGetImageData.call(context, x, y, 1, 1);
-            const modified = originalGetImageData.call(context, x, y, 1, 1);
-            for (let channel = 0; channel < 3; channel += 1) {
-                modified.data[channel] = Math.max(0, Math.min(255, modified.data[channel] + noise(x, y, channel)));
-            }
-            context.putImageData(modified, x, y);
-            const result = originalToDataURL.apply(this, arguments);
-            context.putImageData(original, x, y);
-            return result;
-        } catch (_) {
-            return originalToDataURL.apply(this, arguments);
-        }
-    }, 'toDataURL');
-    define(HTMLCanvasElement.prototype, 'toDataURL', {value: toDataURL, writable: true});
-}
-
-if (window.AnalyserNode && AnalyserNode.prototype.getFloatFrequencyData) {
-    const originalGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;
-    const getFloatFrequencyData = markNative(function getFloatFrequencyData(array) {
-        originalGetFloatFrequencyData.call(this, array);
-        if (array && array.length) {
-            const limit = Math.min(array.length, 32);
-            for (let index = 0; index < limit; index += 7) {
-                array[index] += noise(index, array.length, 0) * 1e-7;
-            }
-        }
-    }, 'getFloatFrequencyData');
-    define(AnalyserNode.prototype, 'getFloatFrequencyData', {value: getFloatFrequencyData, writable: true});
-}
-
-if (window.OfflineAudioContext && OfflineAudioContext.prototype.startRendering) {
-    const originalStartRendering = OfflineAudioContext.prototype.startRendering;
-    const startRendering = markNative(function startRendering() {
-        return originalStartRendering.apply(this, arguments).then(buffer => {
-            try {
-                const channel = buffer.getChannelData(0);
-                if (channel && channel.length > 100) {
-                    const index = (cfg.seed >>> 5) % channel.length;
-                    channel[index] += noise(index, channel.length, 1) * 1e-8;
-                }
-            } catch (_) {}
-            return buffer;
-        });
-    }, 'startRendering');
-    define(OfflineAudioContext.prototype, 'startRendering', {value: startRendering, writable: true});
-}
-
-try {
-    const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
-    if (originalContentWindow && originalContentWindow.get) {
-        define(HTMLIFrameElement.prototype, 'contentWindow', {
-            get: markNative(function contentWindow() {
-                const value = originalContentWindow.get.call(this);
-                return value || window;
-            }, 'get contentWindow')
-        });
-    }
-} catch (_) {}
-
-try {
-    define(screen, 'availTop', {get: markNative(function availTop() { return 0; }, 'get availTop')});
-    define(screen, 'availLeft', {get: markNative(function availLeft() { return 0; }, 'get availLeft')});
-} catch (_) {}
-"""
 
 _UNHIDE_SCRIPT = r"""() => {
     const articleSelectors = [
@@ -734,7 +541,11 @@ def _normalize_proxy(raw: str, bypass: str = "") -> ProxySettings | None:
     if not parsed.hostname:
         return None
     default_port = 1080 if scheme.startswith("socks") else (443 if scheme == "https" else 80)
-    port = parsed.port or default_port
+    try:
+        parsed_port = parsed.port
+    except ValueError:
+        return None
+    port = parsed_port or default_port
     host = parsed.hostname
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
@@ -905,37 +716,8 @@ def resolve_proxy(url: str, strategy: SiteStrategy | None = None) -> ProxySettin
     return resolve_proxy_candidates(url, strategy)[0]
 
 
-def _stealth_seed(domain: str, user_agent: str, proxy: ProxySettings | None) -> int:
-    material = f"{domain}\0{user_agent}\0{proxy.server if proxy else ''}".encode("utf-8")
-    return int.from_bytes(hashlib.blake2s(material, digest_size=4).digest(), "big")
 
 
-def _build_stealth_script(
-    *,
-    domain: str,
-    user_agent: str,
-    proxy: ProxySettings | None,
-) -> str:
-    platform = "MacIntel" if "Macintosh" in user_agent else "Win32"
-    if "Linux" in user_agent and "Android" not in user_agent:
-        platform = "Linux x86_64"
-    seed = _stealth_seed(domain, user_agent, proxy)
-    configurations = (
-        ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) Iris(TM) Plus Graphics 655, OpenGL 4.1)"),
-        ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 Direct3D11 vs_5_0 ps_5_0)"),
-        ("Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon Pro 560X OpenGL Engine, OpenGL 4.1)"),
-    )
-    vendor, renderer = configurations[seed % len(configurations)]
-    config = {
-        "seed": seed,
-        "platform": platform,
-        "hardwareConcurrency": (4, 8, 12, 16)[seed % 4],
-        "deviceMemory": (4, 8, 8, 16)[(seed >> 2) % 4],
-        "languages": ["en-US", "en"],
-        "webglVendor": vendor,
-        "webglRenderer": renderer,
-    }
-    return "(() => {\nconst cfg = " + json.dumps(config, ensure_ascii=False) + ";\n" + _STEALTH_SCRIPT_BODY + "\n})();"
 
 
 def _browser_driver_preference() -> str:
@@ -1028,6 +810,8 @@ class BrowserPool:
         self._sem = asyncio.Semaphore(self._max)
         self._lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
+        self._lease_condition = asyncio.Condition()
+        self._active_pages = 0
         self._idle_by_key: dict[_ContextKey, list[_IdleContext]] = defaultdict(list)
         self._idle_lru: OrderedDict[int, _IdleContext] = OrderedDict()
         self._total_contexts = 0
@@ -1056,10 +840,7 @@ class BrowserPool:
                     await self._cleanup_camoufox_manager()
                     self._browser = None
                     if requested_driver == "camoufox":
-                        # Explicit Camoufox still fails open to Playwright.  This
-                        # keeps the optional dependency from becoming a hard
-                        # runtime requirement when its browser binary is absent.
-                        pass
+                        raise RuntimeError(f"Camoufox requested but unavailable: {exc}") from exc
 
             await self._start_playwright(requested_driver)
             self._started = True
@@ -1136,6 +917,8 @@ class BrowserPool:
             if not self._started and self._pw is None and self._camoufox_manager is None:
                 return
             self._stopping = True
+            async with self._lease_condition:
+                await self._lease_condition.wait_for(lambda: self._active_pages == 0)
             idle_contexts: list[BrowserContext | Any] = []
             async with self._lock:
                 idle_contexts = [entry.context for entry in self._idle_lru.values()]
@@ -1275,12 +1058,6 @@ class BrowserPool:
         if proxy is not None:
             options["proxy"] = proxy.as_playwright()
         context = await self._browser.new_context(**options)
-        script = _build_stealth_script(
-            domain=key.domain,
-            user_agent=key.user_agent,
-            proxy=proxy,
-        )
-        await context.add_init_script(script=script)
         return context
 
     async def _new_camoufox_context(
@@ -1425,6 +1202,44 @@ class BrowserPool:
         except Exception:
             return
 
+    async def _finalize_page_lease(
+        self,
+        *,
+        entry: _IdleContext | None,
+        page: Page | None,
+        reusable: bool,
+        clear_storage: bool,
+    ) -> None:
+        try:
+            if page is not None and entry is not None:
+                if clear_storage:
+                    await self._clear_page_storage(page)
+                try:
+                    await page.close()
+                except Exception:
+                    reusable = False
+            if entry is not None:
+                await self._release_context(entry, reusable)
+        finally:
+            async with self._lease_condition:
+                self._active_pages = max(0, self._active_pages - 1)
+                self._lease_condition.notify_all()
+
+    @staticmethod
+    async def _await_cleanup(task: asyncio.Task[None]) -> None:
+        first_cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await asyncio.shield(task)
+                break
+            except asyncio.CancelledError as exc:
+                if task.done():
+                    raise
+                if first_cancellation is None:
+                    first_cancellation = exc
+        if first_cancellation is not None:
+            raise first_cancellation
+
     @asynccontextmanager
     async def page(
         self,
@@ -1439,13 +1254,20 @@ class BrowserPool:
         parsed_domain = domain or (urlparse(url).hostname or (strategy.domain if strategy else ""))
         normalized_url = url or (f"https://{parsed_domain}/" if parsed_domain else "https://example.com/")
         async with self._sem:
-            key, headers, proxy = self._context_key(
-                strategy, normalized_url, parsed_domain, proxy_override
-            )
-            entry = await self._acquire_context(key, headers, proxy)
+            async with self._lease_condition:
+                if self._stopping or not self._started:
+                    raise RuntimeError("browser pool is stopping")
+                self._active_pages += 1
+
+            entry: _IdleContext | None = None
             page: Page | None = None
             reusable = True
+            key: _ContextKey | None = None
             try:
+                key, headers, proxy = self._context_key(
+                    strategy, normalized_url, parsed_domain, proxy_override
+                )
+                entry = await self._acquire_context(key, headers, proxy)
                 page = await entry.context.new_page()
                 page.set_default_timeout(BROWSER_TIMEOUT)
                 page.set_default_navigation_timeout(BROWSER_TIMEOUT)
@@ -1454,14 +1276,15 @@ class BrowserPool:
                 reusable = False
                 raise
             finally:
-                if page is not None:
-                    if not key.allow_cookies:
-                        await self._clear_page_storage(page)
-                    try:
-                        await page.close()
-                    except Exception:
-                        reusable = False
-                await self._release_context(entry, reusable)
+                cleanup_task = asyncio.create_task(
+                    self._finalize_page_lease(
+                        entry=entry,
+                        page=page,
+                        reusable=reusable,
+                        clear_storage=bool(key is not None and not key.allow_cookies),
+                    )
+                )
+                await self._await_cleanup(cleanup_task)
 
     async def stats(self) -> dict[str, Any]:
         async with self._lock:
@@ -1471,6 +1294,7 @@ class BrowserPool:
                 "max_contexts": self._max,
                 "total_contexts": self._total_contexts,
                 "idle_contexts": len(self._idle_lru),
+                "active_pages": self._active_pages,
                 "driver_warning": self._driver_warning,
             }
 
@@ -1510,40 +1334,6 @@ async def close_shared_browser_pool() -> None:
     pool = _SHARED_POOLS.pop(loop, None)
     if pool is not None:
         await pool.stop()
-
-
-def _build_route_patterns(strategy: SiteStrategy) -> list[str]:
-    """Convert a BPC ``block_regex`` into best-effort Playwright globs."""
-
-    if not strategy.block_regex:
-        return []
-    patterns: list[str] = []
-    for part in re.split(r"\|", strategy.block_regex):
-        part = part.strip().strip("()")
-        glob = _regex_to_glob(part)
-        if glob:
-            patterns.append(glob)
-    if not patterns:
-        patterns.append(f"**/*{strategy.domain}*paywall*")
-    return patterns
-
-
-def _regex_to_glob(regex_part: str) -> str:
-    """Best-effort conversion of a simple regex fragment to a route glob."""
-
-    value = regex_part.replace("\\.", ".").replace("\\/", "/")
-    value = re.sub(r"\.\+", "*", value)
-    value = re.sub(r"\.\*", "*", value)
-    value = re.sub(r"\([^)]*\)", "*", value)
-    value = re.sub(r"\[[^\]]*\]", "?", value)
-    value = re.sub(r"[\\^$]", "", value)
-    if not value or value == "*":
-        return ""
-    if not value.startswith("*"):
-        value = "**/" + value
-    if not value.endswith("*"):
-        value += "*"
-    return value
 
 
 def _compile_general_block_regexes(strategy: SiteStrategy) -> list[re.Pattern[str]]:
@@ -1615,10 +1405,30 @@ async def _handle_resource_route(
     general_patterns: list[re.Pattern[str]],
     strategy_patterns: list[re.Pattern[str]],
     block_images: bool,
+    ssrf_state: dict[str, str] | None = None,
 ) -> None:
     request = route.request
     resource_type = str(request.resource_type)
     url = str(request.url)
+
+    parsed = urlparse(url)
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"about", "blob", "data"}:
+        validation_url = url
+        if scheme == "ws":
+            validation_url = "http:" + url[len("ws:"):]
+        elif scheme == "wss":
+            validation_url = "https:" + url[len("wss:"):]
+        try:
+            await asyncio.to_thread(assert_public_url, validation_url)
+        except SSRFBlocked as exc:
+            if ssrf_state is not None and resource_type == "document":
+                ssrf_state["document"] = str(exc)
+            try:
+                await route.abort()
+            except Exception:
+                pass
+            return
 
     abort = False
     if resource_type != "document" and _is_tracking_request(url):
@@ -1688,7 +1498,7 @@ async def _fetch_for_strategy_single(
     *,
     proxy_override: ProxySettings | None | object = _AUTO_PROXY,
 ) -> BrowserResult:
-    """Fetch a page with stealth masking, interception, proxying, and pooling."""
+    """Fetch a page with interception, proxying, pooling, and the selected browser driver."""
 
     own_pool = False
     active_pool = pool
@@ -1723,6 +1533,7 @@ async def _fetch_for_strategy_single(
                 general_patterns = _compile_general_block_regexes(strategy) if strategy else []
                 strategy_patterns = _compile_strategy_block_regex(strategy)
                 block_images = _truthy_env("PAC_BROWSER_BLOCK_IMAGES", True)
+                ssrf_state: dict[str, str] = {}
                 await page.route(
                     "**/*",
                     partial(
@@ -1730,6 +1541,7 @@ async def _fetch_for_strategy_single(
                         general_patterns=general_patterns,
                         strategy_patterns=strategy_patterns,
                         block_images=block_images,
+                        ssrf_state=ssrf_state,
                     ),
                 )
 
@@ -1753,6 +1565,16 @@ async def _fetch_for_strategy_single(
                     navigation_error = exc
                 except Exception as exc:
                     navigation_error = exc
+
+                if ssrf_state.get("document"):
+                    return BrowserResult(
+                        ok=False,
+                        status=0,
+                        engine=engine,
+                        error_code="SSRF_BLOCKED",
+                        error_msg=ssrf_state["document"],
+                        final_url=page.url,
+                    )
 
                 status = response.status if response is not None else 0
                 try:
@@ -1907,9 +1729,15 @@ async def fetch_for_strategy(
             breaker.mark_success(proxy)
             return result
         last_result = result
-        if proxy is not None and result.error_code in {"BOT_CHALLENGE", "HTTP_BLOCKED"}:
-            breaker.mark_failure(proxy, result.error_code)
-            continue
+        if proxy is not None:
+            if result.error_code in {"BOT_CHALLENGE", "HTTP_BLOCKED"}:
+                breaker.mark_failure(proxy, result.error_code)
+                continue
+            if result.error_code == "NETWORK":
+                # A dead proxy must not prevent the rest of the configured pool
+                # from being attempted.  Do not cool it down here; transient
+                # transport failures should get another chance on a later call.
+                continue
         return result
 
     if last_result is not None:

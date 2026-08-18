@@ -1,7 +1,10 @@
 """Parse BPC extension sites.js into a strategy map."""
+import ipaddress
 import json
 import re
 import sys
+from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 from dataclasses import dataclass, field, asdict, fields
 
@@ -386,19 +389,138 @@ def get_sites_map(sites_js_path: Path | None = None) -> dict[str, SiteStrategy]:
     return sites
 
 
+PUBLIC_SUFFIX_LIST_VERSION = "2026-08-17_18-44-50_UTC"
+PUBLIC_SUFFIX_LIST_COMMIT = "fe5aa073ba579b9d5ae92958b63a7d1de8c13e3a"
+
+
+class _PSLNode:
+    __slots__ = ("children", "terminal", "exception")
+
+    def __init__(self) -> None:
+        self.children: dict[str, _PSLNode] = {}
+        self.terminal = False
+        self.exception = False
+
+
+class _PublicSuffixTrie:
+    """Offline Public Suffix List resolver supporting exact, wildcard and exception rules."""
+
+    def __init__(self, rules: list[str]) -> None:
+        self._root = _PSLNode()
+        for raw_rule in rules:
+            rule = raw_rule.strip()
+            if not rule or rule.startswith("//"):
+                continue
+            exception = rule.startswith("!")
+            if exception:
+                rule = rule[1:]
+            labels = [_normalize_dns_label(label) for label in rule.split(".")]
+            if not labels or any(not label for label in labels):
+                continue
+            node = self._root
+            for label in reversed(labels):
+                node = node.children.setdefault(label, _PSLNode())
+            node.terminal = True
+            node.exception = exception
+
+    def public_suffix_length(self, labels: list[str]) -> int:
+        """Return the number of labels in the prevailing PSL rule's public suffix."""
+
+        if not labels:
+            return 0
+        best_match = 1  # implicit prevailing rule "*"
+        exception_match = 0
+        node = self._root
+        for depth, label in enumerate(reversed(labels), start=1):
+            wildcard = node.children.get("*")
+            if wildcard is not None and wildcard.terminal:
+                best_match = max(best_match, depth)
+
+            child = node.children.get(label)
+            if child is None:
+                break
+            node = child
+            if node.terminal:
+                best_match = max(best_match, depth)
+            if node.exception:
+                exception_match = depth
+                break
+
+        if exception_match:
+            return max(1, exception_match - 1)
+        return min(best_match, len(labels))
+
+    def registrable_domain(self, host: str) -> str | None:
+        presentation = _presentation_hostname(host)
+        normalized = _normalize_hostname(host)
+        if not normalized or not presentation:
+            return None
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            pass
+        else:
+            return normalized
+
+        lookup_labels = normalized.split(".")
+        presentation_labels = presentation.split(".")
+        if len(lookup_labels) != len(presentation_labels) or any(not label for label in lookup_labels):
+            return None
+        suffix_length = self.public_suffix_length(lookup_labels)
+        if suffix_length <= 0 or len(lookup_labels) <= suffix_length:
+            return None
+        return ".".join(presentation_labels[-(suffix_length + 1):])
+
+
+def _normalize_dns_label(label: str) -> str:
+    value = (label or "").strip().casefold()
+    if value == "*":
+        return value
+    try:
+        return value.encode("idna").decode("ascii").casefold()
+    except UnicodeError:
+        return value
+
+
+def _presentation_hostname(host: str) -> str:
+    value = (host or "").strip().rstrip(".")
+    value = value.replace("\u3002", ".").replace("\uff0e", ".").replace("\uff61", ".")
+    return value.casefold()
+
+
+def _normalize_hostname(host: str) -> str:
+    value = _presentation_hostname(host)
+    if not value:
+        return ""
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        pass
+    labels = value.split(".")
+    if any(not label for label in labels):
+        return ""
+    return ".".join(_normalize_dns_label(label) for label in labels)
+
+
+@lru_cache(maxsize=1)
+def _public_suffix_trie() -> _PublicSuffixTrie:
+    try:
+        text = resources.files("bpc_fetch").joinpath("data", "public_suffix_list.dat").read_text(
+            encoding="utf-8"
+        )
+    except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
+        raise RuntimeError("packaged Public Suffix List is missing") from exc
+    version_marker = f"// VERSION: {PUBLIC_SUFFIX_LIST_VERSION}"
+    commit_marker = f"// COMMIT: {PUBLIC_SUFFIX_LIST_COMMIT}"
+    if version_marker not in text or commit_marker not in text:
+        raise RuntimeError("packaged Public Suffix List version does not match the code pin")
+    return _PublicSuffixTrie(text.splitlines())
+
+
 def domain_from_url(url: str) -> str:
-    """Extract registrable domain from URL."""
+    """Return the registrable domain using the vendored, zero-network Public Suffix List."""
+
     from urllib.parse import urlparse
+
     host = urlparse(url).hostname or ""
-    parts = host.split(".")
-    if len(parts) <= 2:
-        return host
-    # Handle two-part TLDs: .co.uk, .com.au, .co.jp, .com.br, etc.
-    two_part_tlds = {"co.uk", "com.au", "co.nz", "co.jp", "co.kr", "com.br",
-                     "co.za", "co.il", "com.sg", "com.tw", "com.ar", "com.uy",
-                     "com.mx", "com.pe", "com.bo", "com.co", "co.ke", "com.pl",
-                     "org.il", "org.uk", "net.au", "com.es", "co.in"}
-    suffix = ".".join(parts[-2:])
-    if suffix in two_part_tlds:
-        return ".".join(parts[-3:])
-    return ".".join(parts[-2:])
+    return _public_suffix_trie().registrable_domain(host) or _presentation_hostname(host)

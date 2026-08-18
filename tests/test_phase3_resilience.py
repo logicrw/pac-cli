@@ -70,3 +70,39 @@ def test_curl_cffi_switch_env(monkeypatch):
 
     monkeypatch.setenv("PAC_CURL_CFFI", "auto")
     assert _curl_cffi_enabled() is True
+
+
+def test_http_proxy_pool_rotates_on_transport_error(monkeypatch):
+    import asyncio
+    from bpc_fetch import browser, strategy
+
+    p1 = browser.ProxySettings("http://proxy1:8080")
+    p2 = browser.ProxySettings("http://proxy2:8080")
+    attempts = []
+
+    monkeypatch.setattr(browser, "resolve_proxy_candidates", lambda *a, **k: [p1, p2])
+
+    async def fake_request_once(client, url, *, headers, timeout, strategy, proxy_override):
+        attempts.append(proxy_override.server)
+        if proxy_override == p1:
+            raise OSError("proxy connect failed")
+        return type(
+            "Response",
+            (),
+            {"status_code": 200, "text": "<html>ok</html>", "headers": {}, "url": url},
+        )()
+
+    monkeypatch.setattr(strategy, "_request_once", fake_request_once)
+    monkeypatch.setattr(strategy, "assert_public_url", lambda url: None)
+
+    async def exercise():
+        client = strategy._AdaptiveHttpClient()
+        try:
+            return await strategy.fetch_page("https://example.com", client=client)
+        finally:
+            await client.aclose()
+
+    body, status = asyncio.run(exercise())
+    assert status == 200
+    assert "ok" in body
+    assert attempts == ["http://proxy1:8080", "http://proxy2:8080"]

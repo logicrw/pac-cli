@@ -13,6 +13,19 @@ from bpc_fetch.rules import sync
 VALID_BASE = 'var defaultSites = {"Base": {"domain": "base.example"}};\n'
 
 
+@pytest.fixture(autouse=True)
+def _deterministic_public_dns(monkeypatch):
+    """SSRF tests must not depend on the runner's external DNS availability."""
+    import socket
+
+    monkeypatch.setattr(
+        "bpc_fetch.ssrf.socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))
+        ],
+    )
+
+
 def test_secure_download_rejects_private_initial_url_without_transport():
     requests = []
     client = httpx.Client(transport=httpx.MockTransport(lambda request: requests.append(request)))

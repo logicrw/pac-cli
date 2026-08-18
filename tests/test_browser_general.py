@@ -62,3 +62,39 @@ def test_general_blockers_do_not_enable_automatic_browser_fallback():
     )
 
     assert "browser_cleanup" not in build_plan(strategy)
+
+
+def test_resource_route_blocks_private_document_before_continue():
+    from bpc_fetch.browser import _handle_resource_route
+
+    class Request:
+        resource_type = "document"
+        url = "http://127.0.0.1/private"
+
+    class Route:
+        request = Request()
+
+        def __init__(self):
+            self.action = ""
+
+        async def abort(self):
+            self.action = "abort"
+
+        async def continue_(self):
+            self.action = "continue"
+
+    async def exercise():
+        route = Route()
+        state = {}
+        await _handle_resource_route(
+            route,
+            general_patterns=[],
+            strategy_patterns=[],
+            block_images=False,
+            ssrf_state=state,
+        )
+        return route.action, state
+
+    action, state = asyncio.run(exercise())
+    assert action == "abort"
+    assert "private_ip" in state["document"]

@@ -2,10 +2,10 @@
 
 环境适配：
 - PAC_SSRF=off 可整体关闭（本机/受信环境调试用，默认开启）
-- 系统代理（HTTP(S)_PROXY/ALL_PROXY）存在时，hostname 的 DNS 在远端解析，
-  本地解析结果无意义，跳过 resolves_private 检查（字面 IP/localhost 仍拦）
 - fake-ip 网段（Surge/Clash 的 198.18.0.0/15）：全部解析结果落在 fake-ip
   段时同样说明 DNS 在远端，跳过 hostname 的私网检查
+- 若代理要求“只在远端解析”且本机 DNS 无法解析，可显式设置
+  PAC_SSRF_TRUST_PROXY_DNS=1。默认仍 fail-closed，避免 NO_PROXY / 代理绕过 SSRF。
 """
 from __future__ import annotations
 
@@ -34,6 +34,12 @@ def _ssrf_disabled() -> bool:
 
 def _proxy_configured() -> bool:
     return any(os.environ.get(v) for v in _PROXY_ENV_VARS)
+
+
+def _trust_proxy_dns() -> bool:
+    return os.environ.get("PAC_SSRF_TRUST_PROXY_DNS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 def _is_fake_ip(ip: str) -> bool:
@@ -85,13 +91,16 @@ def assert_public_url(url: str) -> None:
         if _is_private_ip(h):
             raise SSRFBlocked(f"private_ip:{h}")
         return
-    # hostname: 代理或 fake-ip 环境下 DNS 在远端解析，本地检查无意义，跳过
-    if _proxy_configured():
-        return
-    # resolve DNS
+    # Hostnames are resolved locally even when a proxy exists.  Merely having
+    # HTTPS_PROXY set is not a security boundary: NO_PROXY can still send the
+    # request directly, and a remote proxy may itself be able to reach private
+    # addresses.  The only fail-open mode is an explicit opt-in for environments
+    # whose hostnames genuinely cannot be resolved locally.
     try:
         infos = socket.getaddrinfo(h, None)
     except socket.gaierror as e:
+        if _proxy_configured() and _trust_proxy_dns():
+            return
         raise SSRFBlocked(f"dns_failed:{h}:{e}") from e
     ips = [info[4][0] for info in infos]
     if ips and all(_is_fake_ip(ip) for ip in ips):

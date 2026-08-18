@@ -32,3 +32,8 @@ def cache_map_path() -> Path:
 
 def manifest_path() -> Path:
     return rules_root() / "rules_manifest.json"
+
+
+def snapshot_path() -> Path:
+    """Atomic runtime snapshot containing both cache data and manifest metadata."""
+    return rules_root() / "rules_snapshot.json"
