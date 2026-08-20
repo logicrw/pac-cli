@@ -65,13 +65,24 @@ python scripts/audit_rule_coverage.py --compact
   activity on a public repository. Re-enable the workflow and run
   `workflow_dispatch` once if that happens.
 
+## Docker
+
+Run PAC in a self-contained container with all browser and TLS engines pre-installed:
+
+```bash
+# Build the image
+docker build -t logicrw/pac-cli .
+
+# Run single fetch
+docker run --rm logicrw/pac-cli fetch "https://www.economist.com/..." --compact
+
+# Run diagnostic check
+docker run --rm logicrw/pac-cli doctor --compact
+```
+
 ## Docs
 
-| Doc | Role |
-|-----|------|
-| [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | Phase 1 plan + **§15 expert approval** |
-| [TARGET-ARCHITECTURE.md](docs/TARGET-ARCHITECTURE.md) | Phase **1.5+** only (not week-1) |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Product background |
+- [Architecture Design & Pipeline](docs/ARCHITECTURE.md)
 
 
 ## Diagnostics

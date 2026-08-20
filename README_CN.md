@@ -1,154 +1,93 @@
-<p align="center">
-  <img src="assets/logo.png" width="128" height="128" alt="bpc-fetch logo">
-</p>
+# pac-cli
 
-<h1 align="center">bpc-fetch</h1>
+专为 AI Agent（Claude Code、Cursor、Codex 等）设计的确定性新闻文章抓取与正文 Markdown 提取命令行工具与 Python 库。
 
-<p align="center">
-  付费墙绕过 — 搜索, 发现, 批量抓取新闻文章为 Markdown
-</p>
-
-<p align="center">
-  <a href="#支持站点">936 个站点</a> •
-  <a href="#功能特点">功能</a> •
-  <a href="#安装">安装</a> •
-  <a href="#使用方法">使用</a> •
-  <a href="#致谢">致谢</a>
-</p>
-
-<p align="center">
-  <a href="https://linux.do"><img src="https://img.shields.io/badge/LINUX%20DO-Community-blue?style=flat-square" alt="LINUX DO Community"></a>
-</p>
+> URL → 标准结构化 JSON (`markdown`, `strategy_hit`, `rule_version`, `error_code`, `failure_class`, `diagnostics`)
 
 ---
 
-## 这是什么?
+## 核心能力
 
-命令行工具, 覆盖全球 936 个付费新闻站点, 自动绕过 paywall 并将文章保存为 Markdown + 图片. 复用 [Bypass Paywalls Clean](https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean) 浏览器扩展的绕过逻辑, 无需安装浏览器扩展即可运行.
+1. **协议层 TLS 伪装与内核防指纹**：
+   - 自动识别并使用 `curl_cffi` 模拟 Chrome JA3/JA4 握手；
+   - 自动接入 `Camoufox`（基于 Firefox C++ 内核的抗检测浏览器），拒绝生硬的 JS CDP 注入；
+2. **多层阶梯式降级容灾管道**：
+   - `DirectHttp` (TLS 直连) ➔ `Browser` (Playwright / Camoufox 浏览器) ➔ `MultiGateway` (Archive.today 镜像 / Wayback Machine 快照 / Jina Reader 兜底)；
+3. **高严苛度质量门禁与反拦截壳**：
+   - 100% 杜绝虚假成功：精确识别 Cloudflare、Akamai、DataDome 等 403 拦截壳与多语言订阅提示；
+4. **SWR（Stale-While-Revalidate）零阻塞规则引擎**：
+   - 本地规则缓存优先，7 天 TTL 周期后台异步静默刷新，单次请求响应稳定在 200~300ms 级别；
+5. **离线 Public Suffix List (PSL) Trie 域名解析**：
+   - 内置官方 PSL 前缀树，零网络开销精确识别 `.com.cn`、`.co.uk`、`.com.au` 等复合域名；
+6. **代理池与熔断器（Proxy Circuit Breaker）**：
+   - 支持 `PAC_PROXIES` 代理池轮换与故障自动冷却。
 
-## 支持站点
+---
 
-**936 个站点**, 覆盖 40+ 国家/地区:
+## 快速安装
 
-| 类别 | 代表站点 |
-|------|----------|
-| 财经商业 | The Economist, Financial Times, Bloomberg, WSJ, Reuters, Forbes, Business Insider |
-| 美国新闻 | New York Times, Washington Post, LA Times, Chicago Tribune, Politico |
-| 英欧新闻 | The Telegraph, The Times, Der Spiegel, Le Monde, El País |
-| 科技科学 | Wired, The Atlantic, Nature, Science, Scientific American, MIT Tech Review |
-| 杂志 | The New Yorker, Vanity Fair, Vogue, National Geographic, Esquire |
-| 德语区 | 76 站 (FAZ, Handelsblatt, Süddeutsche Zeitung...) |
-| 法语区 | 69 站 (Le Figaro, Libération, Les Echos...) |
-| 其他 | 荷兰 30, 意大利 28, 西班牙 26, 比利时 22, 澳大利亚 39... |
-
-运行 `bpc-fetch sites` 查看完整列表.
-
-## 功能特点
-
-- **全策略覆盖** — 复用 BPC 扩展全部绕过逻辑: 自定义 UA, Googlebot 伪装, Referer 伪装, Playwright 拦截 paywall JS, archive.org 兜底
-- **自动降级链** — 每个 URL 自动尝试最优策略, 逐级降级直到成功
-- **文章发现** — RSS / sitemap / 首页解析 / 浏览器渲染, 获取任意站点最近文章列表
-- **跨站爬取** — 关键词搜索 + 时间范围过滤 + 并发下载, 一条命令完成
-- **Agent 友好** — JSON 输出, stderr 进度信号, 每个命令返回 `next_command`
-- **跨平台** — pip install 即用 (Win/Linux/Mac), 也可打包为 Windows 单 exe
-
-## 绕过策略
-
-| 策略 | 站点数 | 方法 |
-|------|--------|------|
-| `ua:custom` | 7 | 自定义 User-Agent (Liskov, Google-InspectionTool 等) |
-| `ua:googlebot` | 85 | Googlebot UA 伪装 |
-| `ua:facebookbot` | 5 | Facebook 爬虫 UA |
-| `referer:google` | 2 | Google Referer 头 |
-| `block_js` | 425 | Playwright 通过 `Page.route()` 拦截 paywall 脚本 |
-| `archive` | 274 | 从 archive.org / archive.is 获取缓存 |
-| `cookies` | 138 | 不带追踪 cookie 访问 |
-
-## 安装
-
-### pip 安装 (推荐)
-
+### 本地开发安装
 ```bash
-pip install bpc-fetch
+git clone https://github.com/logicrw/pac-cli.git
+cd pac-cli
+python3 -m venv .venv && source .venv/bin/activate
+
+# 安装完整能力包（含 stealth 与 eval 依赖）
+pip install -e ".[all]"
 playwright install chromium
+camoufox fetch
+
+# 检查环境健康度
+pac doctor --compact
 ```
 
-### 从源码安装
+### Docker 容器化运行
+```bash
+# 构建镜像
+docker build -t logicrw/pac-cli .
+
+# 单篇抓取
+docker run --rm logicrw/pac-cli fetch "https://www.economist.com/..." --compact
+
+# 链路诊断抓取
+docker run --rm logicrw/pac-cli fetch "https://www.wsj.com/..." --diagnostics --compact
+```
+
+---
+
+## 使用指南
 
 ```bash
-git clone https://github.com/Sophomoresty/bpc-fetch.git
-cd bpc-fetch
-pip install -e .
-playwright install chromium
+# 1. 抓取文章（默认精简 JSON）
+pac fetch "https://www.wsj.com/articles/..." --compact
+
+# 2. 抓取并输出链路耗时与质量诊断
+pac fetch "https://www.wsj.com/articles/..." --diagnostics --compact
+
+# 3. 批量抓取（自动去重、带 URL 哈希防文件名覆盖）
+pac batch --file urls.txt --out-dir articles --compact
+
+# 4. 文章发现（支持纯本地零网络 Google News 解码与 RSS/Sitemap 探测）
+pac discover economist.com --limit 5 --compact
+
+# 5. 规则同步与检查
+pac rules show wsj.com --compact
+pac rules sync --compact
 ```
 
-### Windows exe
+---
 
-从 [Releases](https://github.com/Sophomoresty/bpc-fetch/releases) 下载 `bpc-fetch.exe`, 然后:
-
-```
-bpc-fetch.exe install-browser
-bpc-fetch.exe doctor
-```
-
-## 使用方法
+## 测试
 
 ```bash
-# 环境检测
-bpc-fetch doctor
-
-# 查看支持站点
-bpc-fetch sites --filter economist
-
-# 发现某站今日文章
-bpc-fetch discover economist.com --since today
-
-# 抓取单篇文章
-bpc-fetch fetch "https://www.economist.com/..." --out-dir ./articles
-
-# 批量抓取
-bpc-fetch batch --file urls.txt --out-dir ./articles
-
-# 跨站爬取: 关键词 + 时间范围
-bpc-fetch crawl "AI regulation" --sites economist.com,ft.com --since 7d --out-dir ./ai-articles
+pip install -e ".[test]"
+pytest -q
 ```
 
-### 输出格式
+全量 242 个自动化单元与集成测试（包含 77 个 PSL 官方参考用例与 5 个黄金质量门禁测试）。
 
-```
-article-title/
-├── article-title.md      # YAML frontmatter + 正文 + 图片引用
-└── images/
-    ├── img_000_abc1.jpg
-    └── img_001_def2.png
-```
+---
 
-### Agent 集成
+## 开源许可
 
-所有命令输出 JSON, 使用 `--compact` 获取精简输出:
-
-```bash
-bpc-fetch discover ft.com --since today --compact
-# → {"ok": true, "domain": "ft.com", "count": 15, "articles": [...], "next_command": "bpc-fetch batch ..."}
-```
-
-## 打包 Windows exe
-
-```bash
-pip install pyinstaller
-python build/build_win.py
-# 产出: dist/bpc-fetch.exe
-```
-
-## 致谢
-
-本工具基于以下项目的绕过逻辑构建:
-
-- **[Bypass Paywalls Clean](https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean)** by [magnolia1234](https://gitflic.ru/user/magnolia1234) — 提供站点数据库和绕过策略的原始浏览器扩展. 所有 paywall 绕过研究的功劳归属于 BPC 项目维护者.
-- **[LINUX DO](https://linux.do)** — 社区支持与反馈.
-
-## 许可证
-
-MIT — 见 [LICENSE](LICENSE).
-
-`data/sites.js` 文件来自 Bypass Paywalls Clean 项目 (MIT License).
+本项目遵循 MIT 协议，内置的 Public Suffix List 遵循 MPL-2.0 协议，详情见 [NOTICE](NOTICE)。
