@@ -623,10 +623,6 @@ class MultiGatewayArchiveHandler(AsyncHandler):
         if result is not None:
             return result
 
-        result = await self._try_firecrawl_gateway(context)
-        if result is not None:
-            return result
-
         return await self._try_reader_gateway(context)
 
     async def _try_archive_today(self, context: Context) -> dict[str, Any] | None:
@@ -760,133 +756,6 @@ class MultiGatewayArchiveHandler(AsyncHandler):
         if outcome.fatal_result is not None:
             return outcome.fatal_result
         return outcome.result
-
-    async def _try_firecrawl_gateway(self, context: Context) -> dict[str, Any] | None:
-        """Cloud scrape gateway backed by the caller's Firecrawl subscription.
-
-        Activated by ``PAC_FIRECRAWL_API_KEY`` (or ``FIRECRAWL_API_KEY``).
-        Firecrawl's cloud fleet passes the bot walls that local engines cannot
-        (DataDome, Cloudflare Turnstile on archive.today mirrors), so it runs
-        after the free archive tiers and before generic reader gateways.
-        Output stays subject to the same quality gate as every other engine.
-        """
-        api_key = os.environ.get("PAC_FIRECRAWL_API_KEY", "").strip() or os.environ.get(
-            "FIRECRAWL_API_KEY", ""
-        ).strip()
-        if not api_key:
-            return None
-
-        started_at = time.perf_counter()
-        label = "firecrawl_gateway"
-        api_url = "https://api.firecrawl.dev/v1/scrape"
-        payload = {"url": context.url, "formats": ["markdown"], "onlyMainContent": False}
-        try:
-            assert_public_url(api_url)
-            response = await context.client.post(
-                api_url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=TIMEOUT,
-            )
-            status = int(response.status_code)
-            body = response.text
-        except SSRFBlocked as exc:
-            context.strategy_hit.append("firecrawl_gateway_error")
-            context.note_failure(
-                "SSRF_BLOCKED",
-                error=str(exc),
-                failure_class="config",
-                engine="firecrawl",
-            )
-            return None
-        except Exception as exc:
-            context.strategy_hit.append("firecrawl_gateway_error")
-            context.note_failure(
-                "NETWORK",
-                error=f"firecrawl_gateway:{exc}",
-                failure_class="network",
-                engine="firecrawl",
-            )
-            return None
-
-        context.strategy_hit.append("firecrawl_gateway")
-        context.record_attempt(
-            handler=self.__class__.__name__,
-            label=label,
-            engine="firecrawl",
-            status=status,
-            started_at=started_at,
-            error_code="",
-            error="",
-        )
-        if status != 200:
-            context.note_failure(
-                "ARCHIVE_FAILED",
-                error=f"firecrawl_gateway:HTTP {status}",
-                failure_class="network",
-                engine="firecrawl",
-            )
-            return None
-
-        try:
-            markdown = (response.json().get("data") or {}).get("markdown") or ""
-        except Exception:
-            markdown = ""
-        if not markdown.strip():
-            context.note_failure(
-                "EXTRACT_FAILED",
-                error="firecrawl_gateway:empty_markdown",
-                failure_class="extract",
-                engine="firecrawl",
-            )
-            return None
-
-        # Firecrawl hands back markdown; wrap it in minimal article HTML so the
-        # same extraction + quality gate pipeline grades this candidate like
-        # every other engine.  No special-cased success path.
-        import html as _html_mod
-        import re as _re_mod
-
-        # Prefer the first markdown heading as the article title; fall back to
-        # the URL so the extractor always receives a well-formed shell.
-        title_match = _re_mod.search(r"^#\s+(.+)$", markdown, _re_mod.M)
-        fallback_title = (
-            title_match.group(1).strip() if title_match else context.url
-        )
-        body_html = (
-            "<!DOCTYPE html><html><head><title>"
-            + _html_mod.escape(fallback_title, quote=True)
-            + "</title></head><body><article><pre>"
-            + _html_mod.escape(markdown)
-            + "</pre></article></body></html>"
-        )
-        evaluation = await _evaluate_candidate(
-            body_html,
-            context.url,
-            context.domain,
-            dom_result=None,
-            allow_partial=context.options.allow_partial,
-            strategy_hit=context.strategy_hit,
-            rule_version=context.options.rule_version,
-            engine="firecrawl",
-            t0=context.started_at,
-            full_markdown=context.options.full_markdown,
-            warnings=context.warnings,
-        )
-        context.last_quality = evaluation.quality
-        if evaluation.result is not None:
-            context.strategy_hit.append("firecrawl_gateway_ok")
-            return evaluation.result
-        context.note_failure(
-            "QUALITY_GATE",
-            error="firecrawl_gateway:quality_gate",
-            failure_class="quality",
-            engine="firecrawl",
-        )
-        return None
 
     async def _try_reader_gateway(self, context: Context) -> dict[str, Any] | None:
         template = _reader_gateway_template(context.strategy)
@@ -1104,6 +973,131 @@ class _GatewayOutcome:
     result: dict[str, Any] | None = None
     fatal_result: dict[str, Any] | None = None
     cooldown: bool = False
+
+
+class FirecrawlGatewayHandler(AsyncHandler):
+    """Terminal cloud fallback: hand the URL to the caller's Firecrawl fleet.
+
+    Runs last in every plan when ``PAC_FIRECRAWL_API_KEY`` / ``FIRECRAWL_API_KEY``
+    is set.  Local engines (HTTP, Camoufox, archives) fail on hard bot walls;
+    Firecrawl's cloud fleet routinely clears them, so a subscription turns the
+    tail of the chain into a high-coverage safety net.  Output still passes the
+    shared quality gate -- a failed scrape never masquerades as an article.
+    """
+
+    async def process(self, context: Context) -> dict[str, Any] | None:
+        api_key = os.environ.get("PAC_FIRECRAWL_API_KEY", "").strip() or os.environ.get(
+            "FIRECRAWL_API_KEY", ""
+        ).strip()
+        if not api_key:
+            return None
+
+        started_at = time.perf_counter()
+        label = "firecrawl_gateway"
+        api_url = "https://api.firecrawl.dev/v1/scrape"
+        try:
+            assert_public_url(api_url)
+            response = await context.client.post(
+                api_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"url": context.url, "formats": ["markdown"], "onlyMainContent": False},
+                timeout=TIMEOUT,
+            )
+            status = int(response.status_code)
+        except SSRFBlocked as exc:
+            context.strategy_hit.append("firecrawl_gateway_error")
+            context.note_failure(
+                "SSRF_BLOCKED",
+                error=str(exc),
+                failure_class="config",
+                engine="firecrawl",
+            )
+            return None
+        except Exception as exc:
+            context.strategy_hit.append("firecrawl_gateway_error")
+            context.note_failure(
+                "NETWORK",
+                error=f"firecrawl_gateway:{exc}",
+                failure_class="network",
+                engine="firecrawl",
+            )
+            return None
+
+        context.strategy_hit.append("firecrawl_gateway")
+        context.record_attempt(
+            handler=self.__class__.__name__,
+            label=label,
+            engine="firecrawl",
+            status=status,
+            started_at=started_at,
+            error_code="",
+            error="",
+        )
+        if status != 200:
+            context.note_failure(
+                "ARCHIVE_FAILED",
+                error=f"firecrawl_gateway:HTTP {status}",
+                failure_class="network",
+                engine="firecrawl",
+            )
+            return None
+
+        try:
+            markdown = (response.json().get("data") or {}).get("markdown") or ""
+        except Exception:
+            markdown = ""
+        if not markdown.strip():
+            context.note_failure(
+                "EXTRACT_FAILED",
+                error="firecrawl_gateway:empty_markdown",
+                failure_class="extract",
+                engine="firecrawl",
+            )
+            return None
+
+        import html as _html_mod
+        import re as _re_mod
+
+        # Prefer the first markdown heading as the article title; fall back to
+        # the URL so the extractor always receives a well-formed shell.
+        title_match = _re_mod.search(r"^#\s+(.+)$", markdown, _re_mod.M)
+        fallback_title = (
+            title_match.group(1).strip() if title_match else context.url
+        )
+        body_html = (
+            "<!DOCTYPE html><html><head><title>"
+            + _html_mod.escape(fallback_title, quote=True)
+            + "</title></head><body><article><pre>"
+            + _html_mod.escape(markdown)
+            + "</pre></article></body></html>"
+        )
+        evaluation = await _evaluate_candidate(
+            body_html,
+            context.url,
+            context.domain,
+            dom_result=None,
+            allow_partial=context.options.allow_partial,
+            strategy_hit=context.strategy_hit,
+            rule_version=context.options.rule_version,
+            engine="firecrawl",
+            t0=context.started_at,
+            full_markdown=context.options.full_markdown,
+            warnings=context.warnings,
+        )
+        context.last_quality = evaluation.quality
+        if evaluation.result is not None:
+            context.strategy_hit.append("firecrawl_gateway_ok")
+            return evaluation.result
+        context.note_failure(
+            "QUALITY_GATE",
+            error="firecrawl_gateway:quality_gate",
+            failure_class="quality",
+            engine="firecrawl",
+        )
+        return None
 
 
 class ArchiveFallbackHandler(MultiGatewayArchiveHandler):
@@ -1845,6 +1839,9 @@ def _build_handler_chain(plan: Sequence[str]) -> AsyncHandler:
         handlers.append(StealthBrowserHandler())
     if any(step in {"archive_is", "archive_org"} for step in plan):
         handlers.append(MultiGatewayArchiveHandler())
+    # Terminal cloud fallback: active whenever the caller has a Firecrawl key,
+    # independent of the chosen plan.
+    handlers.append(FirecrawlGatewayHandler())
     if not handlers:
         handlers.append(DirectHttpHandler())
     for current, following in zip(handlers, handlers[1:]):
