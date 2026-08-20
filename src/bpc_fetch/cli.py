@@ -74,6 +74,18 @@ def main():
     p_fetch.add_argument("--no-browser", action="store_true")
     p_fetch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
     p_fetch.add_argument("--diagnostics", action="store_true", help="Include structured attempt and quality diagnostics")
+    p_fetch.add_argument(
+        "--cookie",
+        dest="cookie",
+        default=None,
+        help="Cookie header for the target domain (e.g. 'datadome=...'); also via PAC_COOKIE",
+    )
+    p_fetch.add_argument(
+        "--cookie-file",
+        dest="cookie_file",
+        default=None,
+        help="File containing a cookie header (curl -c style Netscape cookies.txt or raw header)",
+    )
 
     p_batch = sub.add_parser("batch", help="Batch fetch (default summary only)", parents=[_common])
     p_batch.add_argument("urls", nargs="*", help="URLs")
@@ -313,6 +325,47 @@ def _cmd_sites(args) -> dict:
     }
 
 
+def _resolve_cookie_header(args) -> str:
+    """Resolve caller cookies from --cookie-file / --cookie / PAC_COOKIE.
+
+    Supports two file shapes: a raw cookie header line, or a Netscape
+    cookies.txt export.  Only the header form participates in PAC's domain
+    routing; the Netscape parser keeps the first matching domain-agnostic
+    name=value pairs to keep behaviour predictable across engines.
+    """
+    import os as _os
+
+    cookie_file = getattr(args, "cookie_file", None)
+    if cookie_file:
+        try:
+            text = Path(cookie_file).read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as exc:
+            raise SystemExit(f"cookie file unreadable: {exc}") from exc
+        if not text:
+            raise SystemExit("cookie file is empty")
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        netscape = [line for line in lines if not line.startswith("#")]
+        # Netscape format: domain 	 flag 	 path 	 secure 	 expiry 	 name 	 value
+        if len(netscape) == 1 and "	" not in netscape[0]:
+            return netscape[0]
+        pairs: list[str] = []
+        for line in netscape:
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                name, value = parts[-2], parts[-1]
+                if name and value:
+                    pairs.append(f"{name}={value}")
+        if pairs:
+            return "; ".join(pairs)
+        raise SystemExit(
+            "cookie file not recognised: expected a raw header line or Netscape cookies.txt"
+        )
+    value = getattr(args, "cookie", None)
+    if value is None:
+        value = _os.environ.get("PAC_COOKIE", "")
+    return (value or "").strip()
+
+
 async def _cmd_fetch(args) -> dict:
     from .extract import download_images
     from .rules.store import get_sites_map_with_version
@@ -351,6 +404,7 @@ async def _cmd_fetch(args) -> dict:
         domain=domain,
         diagnostics=diagnostics_enabled,
         request_id=request_id or None,
+        cookie_header=_resolve_cookie_header(args),
     )
     image_urls = result.pop("_image_urls", [])
     result["warnings"] = list(dict.fromkeys(list(result.get("warnings") or []) + list(warnings)))
@@ -472,6 +526,7 @@ async def _cmd_batch(args) -> dict:
                 domain=domain,
                 diagnostics=diagnostics_enabled,
                 request_id=(f"{batch_request_id}-{index + 1}" if diagnostics_enabled else None),
+                cookie_header=_resolve_cookie_header(args),
             )
             r.pop("_image_urls", None)
             markdown = r.get("markdown") or ""

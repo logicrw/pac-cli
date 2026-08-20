@@ -1499,6 +1499,7 @@ async def _fetch_for_strategy_single(
     pool: BrowserPool | None = None,
     *,
     proxy_override: ProxySettings | None | object = _AUTO_PROXY,
+    cookie_header: str = "",
 ) -> BrowserResult:
     """Fetch a page with interception, proxying, pooling, and the selected browser driver."""
 
@@ -1527,10 +1528,28 @@ async def _fetch_for_strategy_single(
     domain = (urlparse(url).hostname or (strategy.domain if strategy else "")).casefold()
     limiter = get_domain_rate_limiter()
 
+    # Caller cookies ride along as a synthetic strategy so the context pool
+    # keys on them: different cookies get different contexts, and the header
+    # reaches both Playwright and Camoufox through build_headers/_cookie_header.
+    page_strategy = strategy
+    cookie_header = (cookie_header or "").strip()
+    if cookie_header:
+        base_extra = dict(strategy.extra) if (strategy is not None and isinstance(strategy.extra, dict)) else {}
+        page_strategy = SiteStrategy(
+            domain=strategy.domain if strategy else domain,
+            name=strategy.name if strategy else "",
+            useragent=strategy.useragent if strategy else "",
+            useragent_custom=strategy.useragent_custom if strategy else "",
+            referer=strategy.referer if strategy else "",
+            referer_custom=strategy.referer_custom if strategy else "",
+            allow_cookies=True,
+            extra={**base_extra, "cookie": cookie_header},
+        )
+
     try:
         async with limiter.limit(domain):
             async with active_pool.page(
-                strategy, url=url, domain=domain, proxy_override=proxy_override
+                page_strategy, url=url, domain=domain, proxy_override=proxy_override
             ) as page:
                 general_patterns = _compile_general_block_regexes(strategy) if strategy else []
                 strategy_patterns = _compile_strategy_block_regex(strategy)
@@ -1712,6 +1731,8 @@ async def fetch_for_strategy(
     url: str,
     strategy: SiteStrategy | None,
     pool: BrowserPool | None = None,
+    *,
+    cookie_header: str = "",
 ) -> BrowserResult:
     """Fetch through the ordered proxy pool with circuit-breaker failover."""
 
@@ -1724,6 +1745,7 @@ async def fetch_for_strategy(
             strategy,
             pool=pool,
             proxy_override=proxy,
+            cookie_header=cookie_header,
         )
         result.proxy_server = proxy.server if proxy is not None else ""
         result.proxy_attempts = attempt_number
