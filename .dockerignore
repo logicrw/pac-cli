@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.cache_ggshield
+dist/
+build/
+*.egg-info/
+reports/
+.DS_Store
