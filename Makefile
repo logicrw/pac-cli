@@ -1,12 +1,25 @@
-.PHONY: install-local build-win clean
+.PHONY: install install-all test doctor docker-build clean
 
-install-local:
-	uv pip install -e .
-	@echo "Installed. Run: bpc-fetch --help"
+install:
+	pip install -e .
+	playwright install chromium
+	@echo "PAC-CLI installed. Run: pac doctor --compact"
 
-build-win:
-	uv pip install pyinstaller
-	python packaging/build_win.py
+install-all:
+	pip install -e ".[all]"
+	playwright install chromium
+	camoufox fetch
+	@echo "PAC-CLI full stealth suite installed. Run: pac doctor --compact"
+
+test:
+	pytest -q
+
+doctor:
+	pac doctor --compact
+
+docker-build:
+	docker build -t logicrw/pac-cli .
 
 clean:
-	rm -rf dist/ build/__pycache__/ *.egg-info/
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ .ruff_cache/
+	find . -type d -name "__pycache__" -exec rm -rf {} +
