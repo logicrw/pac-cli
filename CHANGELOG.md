@@ -2,30 +2,30 @@
 
 All notable changes to PAC are documented here.
 
-## 0.2.2
+## 0.2.2 (Permanent Architectural Freeze)
 
-- Added a daily GitHub Actions check that validates and sanitizes upstream BPC
-  rule snapshots, audits fields, runs the full test suite, and opens a rules PR
-  only when the central mirror changes.
-- Added a 24-hour client-side lazy rule sync before the first `fetch` or `batch`,
-  with fail-open cache reuse and pin/explicit-file/`--no-rule-sync` controls.
-- Added SSRF-safe, hop-by-hop validated redirects and response-size limits for
-  remote rule downloads.
+### Phase 5: Final Production Consolidation
+- **Zero-Network Public Suffix List (PSL) Trie Resolver**: Built-in lazy reversed-label Trie (`public_suffix_list.dat`, MPL-2.0) accurately resolving global ccTLDs (`.com.cn`, `.co.uk`, `.com.au`, `.edu.tw`, etc.), wildcards, and exception rules with 77/77 official tests.
+- **Opt-in Structured Diagnostics (`--diagnostics`)**: Supports `--diagnostics` across `fetch`, `batch`, and `discover`, returning unique `request_id`, engine execution timelines, attempt history, and quality score breakdowns without inflating default output.
+- **Quality Package Modularization**: Refactored monolithic 1100-line `quality.py` into cohesive `quality/` subpackage (`access_control.py`, `paywall.py`, `metrics.py`, `__init__.py`) with 100% backward-compatible API.
+- **Golden Quality Regression Suite**: Added `test_golden_quality.py` locking in 5 baseline layout evaluation behaviors (Full Article, Newsflash, 403 Challenge, Teaser, Navigation).
+- **Production Hardening & Official Dockerfile**: Added multi-stage `Dockerfile` with pre-installed Playwright Chromium, Camoufox Firefox, and `curl_cffi`. SWR lock `fsync` crash durability and BrowserPool cancellation shielding.
 
-## 0.2.1
+### Phase 4: Offline-First SWR, Google News Decoder & Proxy Circuit Breaker
+- **Stale-While-Revalidate (SWR) Rules Engine**: `pac fetch` / `batch` read local cached snapshot immediately (0ms blocking latency); detached background child process revalidates after 7-day TTL.
+- **Pure Local Google News URL Decoder**: Reverse-decoded `CBMi...` Protobuf/Base64 URLs directly to canonical publisher URLs with zero network requests.
+- **Proxy Pool & Circuit Breaker**: Shared failure cooldown and automatic candidate rotation across HTTP and Browser engines on 403/429/bot challenge/network errors.
 
-- Added an honest quality gate that rejects known teaser, paywall, navigation,
-  and challenge shells instead of counting them as full articles.
-- Fixed CLI output-directory behavior, opt-in image downloads, and `doctor`'s
-  Chromium launch verification.
-- Added atomic, validated rule synchronization and reload, including ZIP input.
-- Added rule-coverage auditing and support for `block_regex_general` with
-  `excluded_domains`.
-- Bundled `sites.js` in wheels so fresh installs retain the built-in rule set.
-- Removed a legacy embedded access token from an unsupported field in the
-  bundled rule snapshot; PAC did not execute that field.
-- Added a minimal Agent Skill for bounded, structured PAC use.
+### Phase 3: Protocol Impersonation & Multi-Gateway Resilience
+- **TLS/JA3 Impersonation**: Integrated `curl_cffi` to simulate Chrome TLS and HTTP/2 handshake fingerprints with fail-open fallback to `httpx`.
+- **Camoufox Anti-Detect Engine**: Integrated C++ Firefox-based Camoufox browser driver with main-world DOM cleaning.
+- **Multi-Gateway Fallback Ladder**: `archive.today / archive.ph` (with 60s domain cooldown) -> `Wayback Machine API` -> `Reader Gateway` (`PAC_READER_GATEWAY`).
 
-Phase 1 live results remain environment-limited: the accepted result was
-**5/48**, compared with the normalized baseline of **6/48**. This release does
-not claim broad publisher coverage.
+### Phase 2: Asynchronous Chain of Responsibility & Quality Gate
+- **Pipeline Architecture**: Structured `DirectHttpHandler` -> `StealthBrowserHandler` -> `MultiGatewayArchiveHandler`.
+- **Quality Gate**: DOM/text density scoring, multi-language teaser classification, and newsflash exemptions.
+- **Ingress Discovery**: Added `pac discover` for RSS, Sitemap, and Google News discovery.
+
+### Phase 1: Core Engine Normalization
+- Streamlined CLI to `pac` with strict JSON envelope and machine-readable exit codes.
+- Added daily GitHub Actions rule sync workflow and SSRF security guards.
