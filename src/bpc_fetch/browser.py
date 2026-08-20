@@ -1401,15 +1401,17 @@ def _is_paywall_provider(url: str) -> bool:
 
 async def _handle_resource_route(
     route: Any,
-    *,
+    request: Any = None,
+    *args: Any,
     general_patterns: list[re.Pattern[str]],
     strategy_patterns: list[re.Pattern[str]],
     block_images: bool,
     ssrf_state: dict[str, str] | None = None,
+    **kwargs: Any,
 ) -> None:
-    request = route.request
-    resource_type = str(request.resource_type)
-    url = str(request.url)
+    req = request if request is not None else getattr(route, "request", None)
+    resource_type = str(req.resource_type) if req is not None else str(getattr(route.request, "resource_type", ""))
+    url = str(req.url) if req is not None else str(getattr(route.request, "url", ""))
 
     parsed = urlparse(url)
     scheme = parsed.scheme.casefold()
