@@ -111,8 +111,10 @@ class FetchOptions:
     plan: Sequence[str]
     # Caller-supplied cookie header (``--cookie`` / ``PAC_COOKIE_FILE``).
     # Applied only to the target domain and archive.today mirror gateways,
-    # never to third-party reader gateways.
+    # never to third-party reader gateways.  When empty, the per-domain cookie
+    # vault (``pac cookies``) is consulted for the target's registrable domain.
     cookie_header: str = ""
+    use_cookie_vault: bool = True
 
 
 @dataclass
@@ -1914,6 +1916,15 @@ async def fetch_article(
             force_archive=force_archive,
         )
     )
+    resolved_cookie_header = (cookie_header or "").strip()
+    if not resolved_cookie_header:
+        # Fall back to the per-domain cookie vault (``pac cookies``); an
+        # explicit --cookie / PAC_COOKIE always wins over the vault.
+        try:
+            from .cookies import cookie_header_for_url
+            resolved_cookie_header = cookie_header_for_url(url)
+        except Exception:
+            resolved_cookie_header = ""
     options = FetchOptions(
         use_browser=use_browser,
         allow_partial=allow_partial,
@@ -1921,7 +1932,7 @@ async def fetch_article(
         force_archive=force_archive,
         full_markdown=full_markdown,
         plan=plan,
-        cookie_header=(cookie_header or "").strip(),
+        cookie_header=resolved_cookie_header,
     )
 
     own_client = client is None

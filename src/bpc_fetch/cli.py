@@ -98,6 +98,18 @@ def main():
     p_batch.add_argument("--no-rule-sync", action="store_true", help="Skip background rule revalidation")
     p_batch.add_argument("--diagnostics", action="store_true", help="Include structured attempt and quality diagnostics")
 
+    p_cookies = sub.add_parser("cookies", help="Manage the per-site cookie vault", parents=[_common])
+    csub = p_cookies.add_subparsers(dest="cookies_cmd")
+    c_list = csub.add_parser("list", help="List vault entries (no secrets shown)", parents=[_common])
+    c_store = csub.add_parser("store", help="Store cookie header for a domain", parents=[_common])
+    c_store.add_argument("domain", help="Registrable domain, e.g. theinformation.com")
+    c_store.add_argument("--header", help="Raw Cookie header value; omit to read stdin")
+    c_store.add_argument("--file", help="Read the header from a file (raw line or Netscape cookies.txt)")
+    c_delete = csub.add_parser("delete", help="Remove a domain from the vault", parents=[_common])
+    c_delete.add_argument("domain")
+    c_import = csub.add_parser("import", help="Import cookies for a domain from a local Chromium-based browser (macOS)", parents=[_common])
+    c_import.add_argument("domain", help="Target registrable domain, e.g. theinformation.com")
+    c_import.add_argument("--browser", default="auto", help="Browser profile: auto (Dia/Chrome/Arc/Edge), or an explicit 'User Data' dir")
     p_discover = sub.add_parser("discover", help="Discover recent articles from domain or RSS", parents=[_common])
     p_discover.add_argument("target", help="Domain, RSS URL, or news topic query")
     p_discover.add_argument("--query", "-q", type=str, default=None, help="Search keyword filter")
@@ -162,6 +174,8 @@ async def _dispatch(args) -> dict:
         return _cmd_install_browser(args)
     if args.command == "rules":
         return await _cmd_rules(args)
+    if args.command == "cookies":
+        return _cmd_cookies(args)
     return {
         "ok": False,
         "error_code": "INTERNAL",
@@ -564,6 +578,199 @@ async def _cmd_batch(args) -> dict:
             items=zip(urls, results),
         )
     return result
+
+
+def _cmd_cookies(args) -> dict:
+    """Cookie vault management: list / store / delete / import."""
+    from . import cookies as vault
+
+    cmd = getattr(args, "cookies_cmd", "")
+    try:
+        if cmd == "list":
+            return {
+                "ok": True,
+                "backend": vault.vault_backend(),
+                "root": str(vault.vault_root()),
+                "entries": vault.list_domains(),
+            }
+        if cmd == "store":
+            header = getattr(args, "header", None)
+            if not header and getattr(args, "file", None):
+                header = _read_cookie_source(args.file)
+            if not header:
+                import sys as _sys
+
+                header = _sys.stdin.read().strip()
+            path = vault.store(args.domain, header)
+            return {
+                "ok": True,
+                "domain": args.domain,
+                "stored": True,
+                "backend": vault.vault_backend(),
+                "path": str(path) if path else None,
+            }
+        if cmd == "delete":
+            removed = vault.delete(args.domain)
+            return {"ok": removed, "domain": args.domain, "removed": removed}
+        if cmd == "import":
+            header, source = _import_browser_cookies(args.domain, getattr(args, "browser", "auto"))
+            if not header:
+                return {
+                    "ok": False,
+                    "error_code": "IMPORT_FAILED",
+                    "failure_class": "config",
+                    "error": source,
+                    "strategy_hit": [],
+                }
+            vault.store(args.domain, header)
+            names = [p.split("=", 1)[0] for p in header.split(";") if "=" in p]
+            return {
+                "ok": True,
+                "domain": args.domain,
+                "imported_from": source,
+                "cookie_names": names,
+            }
+        return {
+            "ok": False,
+            "error_code": "USAGE",
+            "failure_class": "config",
+            "error": "usage: pac cookies {list|store|delete|import}",
+            "strategy_hit": [],
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "VAULT_ERROR",
+            "failure_class": "config",
+            "error": str(exc),
+            "strategy_hit": [],
+        }
+
+
+def _read_cookie_source(path: str) -> str:
+    """Read a raw header line or Netscape cookies.txt into a header string."""
+    from pathlib import Path
+
+    text = Path(path).read_text(encoding="utf-8", errors="replace").strip()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    netscape = [ln for ln in lines if not ln.startswith("#")]
+    if len(netscape) == 1 and "\t" not in netscape[0]:
+        return netscape[0]
+    pairs: list[str] = []
+    for line in netscape:
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            name, value = parts[-2], parts[-1]
+            if name and value:
+                pairs.append(f"{name}={value}")
+    if pairs:
+        return "; ".join(pairs)
+    raise SystemExit(f"cookie file not recognised: {path}")
+
+
+_DIA_SAFE_STORAGE = "Dia Safe Storage"
+
+
+def _chromium_candidates(browser: str) -> list[tuple[str, str]]:
+    """Return (profile_dir, keychain_service) candidates for a Chromium browser."""
+    home = os.path.expanduser("~")
+    app_support = Path(home) / "Library" / "Application Support"
+    if browser != "auto":
+        return [(browser, _DIA_SAFE_STORAGE), (browser, "Chrome Safe Storage")]
+    return [
+        (str(app_support / "Dia" / "User Data"), _DIA_SAFE_STORAGE),
+        (str(app_support / "Google" / "Chrome"), "Chrome Safe Storage"),
+        (str(app_support / "Arc" / "User Data"), "Arc Safe Storage"),
+        (str(app_support / "Microsoft Edge"), "Chrome Safe Storage"),
+    ]
+
+
+def _import_browser_cookies(domain: str, browser: str) -> tuple[str, str]:
+    """Decrypt Chromium cookies for a domain from a local profile (macOS).
+
+    Returns (header, source_description); header is empty on failure with the
+    description carrying the reason.  Cookies are filtered to non-expired
+    entries matching the target registrable domain.
+    """
+    import datetime
+    import hashlib
+    import shutil
+    import sqlite3
+    import tempfile
+    import time as _time
+
+    for profile_root, keychain_service in _chromium_candidates(browser):
+        root = Path(profile_root)
+        if not root.exists():
+            continue
+        cookie_dbs: list[Path] = []
+        if (root / "Default" / "Cookies").exists():
+            cookie_dbs.append(root / "Default" / "Cookies")
+        cookie_dbs.extend(sorted(root.glob("Profile */Cookies")))
+        if not cookie_dbs:
+            continue
+
+        key_result = os.popen(
+            f'security find-generic-password -w -s "{keychain_service}" 2>/dev/null'
+        ).read()
+        key_b64 = key_result.strip()
+        if not key_b64:
+            continue
+        aes_key = hashlib.pbkdf2_hmac("sha1", key_b64.encode(), b"saltysalt", 1003, dklen=16)
+
+        for db in cookie_dbs:
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                shutil.copy(db, tmp_path)
+                conn = sqlite3.connect(tmp_path)
+                rows = conn.execute(
+                    "SELECT host_key, name, encrypted_value, expires_utc "
+                    "FROM cookies WHERE host_key LIKE ?",
+                    (f"%{domain}%",),
+                ).fetchall()
+                conn.close()
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+            if not rows:
+                continue
+
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+            now_unix = _time.time()
+            pairs: list[str] = []
+            for host, name, enc, expires_utc in rows:
+                if expires_utc:
+                    exp_unix = expires_utc / 1_000_000 - 11_644_473_600
+                    if exp_unix <= now_unix:
+                        continue
+                if not (enc[:3] in (b"v10", b"v20")):
+                    continue
+                try:
+                    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(b" " * 16))
+                    dec = cipher.decryptor()
+                    plain = dec.update(enc[3:]) + dec.finalize()
+                    pad = plain[-1]
+                    if 0 < pad <= 16:
+                        plain = plain[:-pad]
+                    value = plain[32:].decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+                if not value:
+                    continue
+                key = f"{name}={value}"
+                if key not in pairs:
+                    pairs.append(key)
+
+            if pairs:
+                source = f"{root.name}/{'/'.join(db.parts[-2:-1])} ({keychain_service})"
+                return "; ".join(pairs), source
+
+    return "", f"no cookies for {domain} found in known Chromium profiles"
 
 
 async def _cmd_discover(args) -> dict:
