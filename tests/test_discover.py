@@ -3,11 +3,13 @@ import asyncio
 import httpx
 import pytest
 
+from bpc_fetch import discover
 from bpc_fetch.discover import (
     _extract_rss_links_from_html,
     _parse_rss,
     _parse_sitemap,
     _safe_get,
+    discover_articles,
 )
 
 SAMPLE_RSS_2 = """<?xml version="1.0" encoding="UTF-8"?>
@@ -99,6 +101,25 @@ def test_safe_get_rejects_private_redirect_before_second_request():
 
     asyncio.run(exercise())
     assert requested == ["https://8.8.8.8/start"]
+
+
+def test_scoped_bing_request_contains_encoded_domain_query(monkeypatch):
+    requested = []
+    bing_rss = """<?xml version=\"1.0\"?><rss><channel><title>Bing</title>
+    <item><title>AI article - WSJ</title><link>https://www.bing.com/news/apiclick.aspx?url=https%3A%2F%2Fwww.wsj.com%2Farticle</link></item>
+    </channel></rss>"""
+
+    async def fake_safe_get(client, url, **kwargs):
+        requested.append(url)
+        return httpx.Response(200, text=bing_rss)
+
+    monkeypatch.setattr(discover, "_safe_get", fake_safe_get)
+    result = asyncio.run(discover_articles("wsj.com", search_query="AI"))
+
+    assert result["source_type"] == "bing_news_rss"
+    assert requested[0].startswith("https://www.bing.com/news/search?")
+    assert "q=site%3Awsj.com%20AI" in requested[0]
+    assert "setmkt=en-US" in requested[0]
 
 
 def test_safe_get_rejects_oversized_body():

@@ -180,7 +180,7 @@ async def discover_articles(
             if bing_query:
                 encoded_bing = urllib.parse.quote(bing_query)
                 bing_news_url = (
-                    "https://www.bing.com/news/search?q={encoded_bing}&format=rss&setmkt=en-US&setlang=en"
+                    f"https://www.bing.com/news/search?q={encoded_bing}&format=rss&setmkt=en-US&setlang=en"
                 )
                 source_url = bing_news_url
                 try:

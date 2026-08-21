@@ -34,7 +34,7 @@ from .quality import (
 from .result import (
     attach_diagnostics, classify_http_failure, fail_result, new_request_id, ok_result,
 )
-from .sites import SiteStrategy
+from .sites import SiteStrategy, domain_from_url
 from .ssrf import SSRFBlocked, assert_public_url
 
 UA_GOOGLEBOT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
@@ -110,9 +110,10 @@ class FetchOptions:
     full_markdown: bool
     plan: Sequence[str]
     # Caller-supplied cookie header (``--cookie`` / ``PAC_COOKIE_FILE``).
-    # Applied only to the target domain and archive.today mirror gateways,
-    # never to third-party reader gateways.  When empty, the per-domain cookie
-    # vault (``pac cookies``) is consulted for the target's registrable domain.
+    # Applied only to the target publisher's registrable domain; archive,
+    # reader, cloud, and syndication gateways never receive it. When empty,
+    # the per-domain cookie vault (``pac cookies``) is consulted for the
+    # target's registrable domain.
     cookie_header: str = ""
     use_cookie_vault: bool = True
 
@@ -814,15 +815,9 @@ class MultiGatewayArchiveHandler(AsyncHandler):
     ) -> "_GatewayOutcome":
         started_at = time.perf_counter()
         gateway_host = (urlparse(gateway_url).hostname or "").casefold().rstrip(".")
-        is_archive_today_mirror = gateway_host in ARCHIVE_TODAY_HOSTS or any(
-            gateway_host == host or gateway_host == f"www.{host}" for host in ARCHIVE_TODAY_HOSTS
-        )
-        # Caller cookies unlock the archive.today mirror family only; they are
-        # deliberately withheld from other gateways (reader proxies, wayback)
-        # to avoid leaking credentials to third parties.
-        gateway_cookie = (
-            context.options.cookie_header if (context.options.cookie_header and is_archive_today_mirror) else ""
-        )
+        # Gateways are third parties. Publisher cookies authenticate a user to
+        # the requested outlet only and must never be forwarded to an archive,
+        # reader, or cloud scraping service.
         try:
             assert_public_url(gateway_url)
             html, status = await self._limited_fetch(
@@ -830,7 +825,6 @@ class MultiGatewayArchiveHandler(AsyncHandler):
                 gateway_url,
                 SiteStrategy(domain=gateway_host or context.domain, useragent=""),
                 timeout=TIMEOUT,
-                cookie_header=gateway_cookie,
             )
         except SSRFBlocked as exc:
             error_label = f"{label}_error"
@@ -1345,6 +1339,7 @@ class _AdaptiveHttpClient:
         timeout: float,
         strategy: SiteStrategy | None,
         proxy_override: Any = _AUTO_HTTP_PROXY,
+        allow_strategy_cookies: bool = True,
     ) -> Any:
         curl_session = await self._curl_session()
         if curl_session is not None:
@@ -1356,7 +1351,7 @@ class _AdaptiveHttpClient:
                     "impersonate": CURL_CFFI_IMPERSONATE,
                     "default_headers": False,
                 }
-                cookies = _strategy_cookies(strategy)
+                cookies = _strategy_cookies(strategy) if allow_strategy_cookies else None
                 if cookies:
                     request_kwargs["cookies"] = cookies
                 request_kwargs.update(
@@ -1545,6 +1540,7 @@ async def _request_once(
     timeout: float,
     strategy: SiteStrategy | None,
     proxy_override: Any = _AUTO_HTTP_PROXY,
+    allow_strategy_cookies: bool = True,
 ) -> Any:
     if isinstance(client, _AdaptiveHttpClient):
         return await client.get(
@@ -1553,6 +1549,7 @@ async def _request_once(
             timeout=timeout,
             strategy=strategy,
             proxy_override=proxy_override,
+            allow_strategy_cookies=allow_strategy_cookies,
         )
     if _is_curl_client(client):
         request_kwargs: dict[str, Any] = {
@@ -1562,7 +1559,7 @@ async def _request_once(
             "impersonate": CURL_CFFI_IMPERSONATE,
             "default_headers": False,
         }
-        cookies = _strategy_cookies(strategy)
+        cookies = _strategy_cookies(strategy) if allow_strategy_cookies else None
         if cookies:
             request_kwargs["cookies"] = cookies
         request_kwargs.update(
@@ -1613,6 +1610,7 @@ async def fetch_page(
     else:
         proxy_candidates = [_AUTO_HTTP_PROXY]
 
+    origin_domain = domain_from_url(url)
     last_text = ""
     last_status = 0
     last_transport_error: Exception | None = None
@@ -1622,13 +1620,20 @@ async def fetch_page(
             try:
                 for redirect_count in range(MAX_REDIRECTS + 1):
                     assert_public_url(current_url)
+                    request_headers = dict(headers)
+                    # Cookie headers are scoped to the publisher's registrable
+                    # domain. A cross-domain redirect must never inherit them.
+                    allow_strategy_cookies = domain_from_url(current_url) == origin_domain
+                    if not allow_strategy_cookies:
+                        request_headers.pop("Cookie", None)
                     response = await _request_once(
                         active_client,
                         current_url,
-                        headers=headers,
+                        headers=request_headers,
                         timeout=timeout,
                         strategy=strategy,
                         proxy_override=proxy,
+                        allow_strategy_cookies=allow_strategy_cookies,
                     )
                     status = _response_status(response)
                     text = _response_text(response)
