@@ -142,9 +142,15 @@ def classify_access_control_page(
             re.I | re.S,
         )
     )
+    # Strong challenge signatures only. ``challenge-platform`` alone is NOT
+    # counted: Cloudflare injects that path into its always-on beacon script
+    # on ordinary fully-rendered articles (observed on theinformation.com),
+    # so it produced false positives on logged-in article pages.
     challenge_script = bool(
         re.search(
-            r"(?:challenge-platform|cdn-cgi/challenge|awswaf|px-captcha|captcha-delivery|"
+            r"(?:_cf_chl_opt|cf-chl-cfg|chl_page/orchestrate|"
+            r"cdn-cgi/challenge-platform/h/[a-z]/orchestrate|"
+            r"awswaf|px-captcha|captcha-delivery|"
             r"/challenge\.js|/captcha\.js)",
             raw,
             re.I,
