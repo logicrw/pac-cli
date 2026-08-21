@@ -1,6 +1,12 @@
 import asyncio
 
-from bpc_fetch.browser import _compile_general_block_regexes, _handle_general_block_route
+from bpc_fetch.browser import (
+    _caller_cookie_pairs,
+    _compile_general_block_regexes,
+    _handle_general_block_route,
+    _handle_resource_route,
+    _install_caller_cookies,
+)
 from bpc_fetch.sites import SiteStrategy
 from bpc_fetch.strategy import build_plan
 
@@ -98,3 +104,64 @@ def test_resource_route_blocks_private_document_before_continue():
     action, state = asyncio.run(exercise())
     assert action == "abort"
     assert "private_ip" in state["document"]
+
+
+def test_caller_cookie_header_is_parsed_without_domain_widening():
+    assert _caller_cookie_pairs("token=publisher; empty=; malformed") == [
+        {"name": "token", "value": "publisher"},
+    ]
+
+
+def test_browser_cookie_installation_is_bound_to_target_url():
+    class Context:
+        def __init__(self):
+            self.calls = []
+
+        async def add_cookies(self, cookies):
+            self.calls.append(cookies)
+
+    class Page:
+        context = Context()
+
+    page = Page()
+    asyncio.run(_install_caller_cookies(
+        page,
+        "https://www.publisher.example/article",
+        "session=publisher-only; token=authorized",
+    ))
+    assert page.context.calls == [[
+        {"name": "session", "value": "publisher-only", "url": "https://www.publisher.example/article"},
+        {"name": "token", "value": "authorized", "url": "https://www.publisher.example/article"},
+    ]]
+
+
+def test_paywall_provider_is_not_blocked_without_explicit_cleanup():
+    class Request:
+        resource_type = "script"
+        url = "https://cdn.tinypass.com/paywall.js"
+
+    class Route:
+        request = Request()
+
+        def __init__(self):
+            self.action = ""
+
+        async def abort(self):
+            self.action = "abort"
+
+        async def continue_(self):
+            self.action = "continue"
+
+    async def exercise(allow_paywall_cleanup):
+        route = Route()
+        await _handle_resource_route(
+            route,
+            general_patterns=[],
+            strategy_patterns=[],
+            block_images=False,
+            allow_paywall_cleanup=allow_paywall_cleanup,
+        )
+        return route.action
+
+    assert asyncio.run(exercise(False)) == "continue"
+    assert asyncio.run(exercise(True)) == "abort"

@@ -380,6 +380,19 @@ def _resolve_cookie_header(args) -> str:
     return (value or "").strip()
 
 
+def _explicit_batch_cookie_scope_error(urls: list[str], cookie_header: str) -> str:
+    """Reject one explicit cookie header for a multi-domain batch."""
+    if not cookie_header:
+        return ""
+    domains = {domain_from_url(value) for value in urls}
+    if len(domains) <= 1:
+        return ""
+    return (
+        "explicit --cookie/--cookie-file/PAC_COOKIE requires all batch URLs to share one "
+        "registrable domain; use the cookie vault for multi-domain batches"
+    )
+
+
 async def _cmd_fetch(args) -> dict:
     from .extract import download_images
     from .rules.store import get_sites_map_with_version
@@ -508,6 +521,17 @@ async def _cmd_batch(args) -> dict:
             "strategy_hit": [],
         }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
 
+    explicit_cookie_header = _resolve_cookie_header(args)
+    cookie_scope_error = _explicit_batch_cookie_scope_error(urls, explicit_cookie_header)
+    if cookie_scope_error:
+        return _attach_command_diagnostics({
+            "ok": False,
+            "error_code": "COOKIE_SCOPE_ERROR",
+            "failure_class": "config",
+            "error": cookie_scope_error,
+            "strategy_hit": [],
+        }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
+
     sites_js = getattr(args, "sites_js", None)
     with swr_nonblocking_mode():
         sync_result = maybe_sync_rules(
@@ -540,7 +564,7 @@ async def _cmd_batch(args) -> dict:
                 domain=domain,
                 diagnostics=diagnostics_enabled,
                 request_id=(f"{batch_request_id}-{index + 1}" if diagnostics_enabled else None),
-                cookie_header=_resolve_cookie_header(args),
+                cookie_header=explicit_cookie_header,
             )
             r.pop("_image_urls", None)
             markdown = r.get("markdown") or ""

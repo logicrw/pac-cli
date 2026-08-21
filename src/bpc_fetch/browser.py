@@ -7,6 +7,7 @@ fingerprint shims.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -344,6 +345,7 @@ class _ContextKey:
     explicit_locale: bool
     explicit_timezone: bool
     explicit_viewport: bool
+    caller_cookie_fingerprint: str = ""
 
 
 @dataclass
@@ -974,6 +976,11 @@ class BrowserPool:
         explicit_user_agent = bool(
             strategy and (strategy.useragent or strategy.useragent_custom)
         )
+        caller_cookie_fingerprint = ""
+        if strategy is not None and isinstance(strategy.extra, Mapping):
+            value = strategy.extra.get("_caller_cookie_fingerprint")
+            if isinstance(value, str):
+                caller_cookie_fingerprint = value
         key = _ContextKey(
             domain=domain.casefold().rstrip("."),
             user_agent=user_agent,
@@ -988,6 +995,7 @@ class BrowserPool:
             explicit_locale=locale_raw is not None,
             explicit_timezone=timezone_raw is not None,
             explicit_viewport=viewport_width_raw is not None or viewport_height_raw is not None,
+            caller_cookie_fingerprint=caller_cookie_fingerprint,
         )
         return key, headers, proxy
 
@@ -1406,6 +1414,7 @@ async def _handle_resource_route(
     general_patterns: list[re.Pattern[str]],
     strategy_patterns: list[re.Pattern[str]],
     block_images: bool,
+    allow_paywall_cleanup: bool = False,
     ssrf_state: dict[str, str] | None = None,
     **kwargs: Any,
 ) -> None:
@@ -1435,7 +1444,11 @@ async def _handle_resource_route(
     abort = False
     if resource_type != "document" and _is_tracking_request(url):
         abort = True
-    elif resource_type in {"script", "xhr", "fetch"} and _is_paywall_provider(url):
+    elif (
+        allow_paywall_cleanup
+        and resource_type in {"script", "xhr", "fetch"}
+        and _is_paywall_provider(url)
+    ):
         abort = True
     elif resource_type in {"script", "xhr", "fetch"} and any(
         pattern.search(url) for pattern in general_patterns
@@ -1493,6 +1506,24 @@ def _navigation_error_code(error: BaseException) -> str:
     return "NETWORK"
 
 
+def _caller_cookie_pairs(cookie_header: str) -> list[dict[str, str]]:
+    """Parse a raw Cookie header into host-only browser cookie values."""
+    pairs: list[dict[str, str]] = []
+    for item in cookie_header.split(";"):
+        name, separator, value = item.strip().partition("=")
+        if separator and name and value:
+            pairs.append({"name": name, "value": value})
+    return pairs
+
+
+async def _install_caller_cookies(page: Page, url: str, cookie_header: str) -> None:
+    """Install caller cookies for the target URL only, never as global headers."""
+    pairs = _caller_cookie_pairs(cookie_header)
+    if not pairs:
+        return
+    await page.context.add_cookies([{**pair, "url": url} for pair in pairs])
+
+
 async def _fetch_for_strategy_single(
     url: str,
     strategy: SiteStrategy | None,
@@ -1528,9 +1559,8 @@ async def _fetch_for_strategy_single(
     domain = (urlparse(url).hostname or (strategy.domain if strategy else "")).casefold()
     limiter = get_domain_rate_limiter()
 
-    # Caller cookies ride along as a synthetic strategy so the context pool
-    # keys on them: different cookies get different contexts, and the header
-    # reaches both Playwright and Camoufox through build_headers/_cookie_header.
+    # Caller cookies need their own pooled context, but must not be installed
+    # as context-wide HTTP headers: those headers leak to cross-origin assets.
     page_strategy = strategy
     cookie_header = (cookie_header or "").strip()
     if cookie_header:
@@ -1543,7 +1573,12 @@ async def _fetch_for_strategy_single(
             referer=strategy.referer if strategy else "",
             referer_custom=strategy.referer_custom if strategy else "",
             allow_cookies=True,
-            extra={**base_extra, "cookie": cookie_header},
+            extra={
+                **base_extra,
+                "_caller_cookie_fingerprint": hashlib.sha256(
+                    cookie_header.encode("utf-8")
+                ).hexdigest(),
+            },
         )
 
     try:
@@ -1554,6 +1589,7 @@ async def _fetch_for_strategy_single(
                 general_patterns = _compile_general_block_regexes(strategy) if strategy else []
                 strategy_patterns = _compile_strategy_block_regex(strategy)
                 block_images = _truthy_env("PAC_BROWSER_BLOCK_IMAGES", True)
+                allow_paywall_cleanup = _truthy_env("PAC_BROWSER_PAYWALL_CLEANUP", False)
                 ssrf_state: dict[str, str] = {}
                 await page.route(
                     "**/*",
@@ -1562,6 +1598,7 @@ async def _fetch_for_strategy_single(
                         general_patterns=general_patterns,
                         strategy_patterns=strategy_patterns,
                         block_images=block_images,
+                        allow_paywall_cleanup=allow_paywall_cleanup,
                         ssrf_state=ssrf_state,
                     ),
                 )
@@ -1573,6 +1610,7 @@ async def _fetch_for_strategy_single(
                         return
 
                 page.on("dialog", dismiss_dialog)
+                await _install_caller_cookies(page, url, cookie_header)
                 response = None
                 navigation_error: BaseException | None = None
                 nonfatal_errors: list[str] = []
@@ -1627,19 +1665,20 @@ async def _fetch_for_strategy_single(
                     )
                 except Exception as exc:
                     nonfatal_errors.append(f"scroll:{exc}")
-                try:
-                    await _evaluate_page_script(
-                        page,
-                        _UNHIDE_SCRIPT,
-                        engine=engine,
-                        modifies_dom=True,
-                    )
-                except Exception as exc:
-                    nonfatal_errors.append(f"unhide:{exc}")
-                try:
-                    await page.wait_for_timeout(250)
-                except Exception as exc:
-                    nonfatal_errors.append(f"post_unhide_wait:{exc}")
+                if allow_paywall_cleanup:
+                    try:
+                        await _evaluate_page_script(
+                            page,
+                            _UNHIDE_SCRIPT,
+                            engine=engine,
+                            modifies_dom=True,
+                        )
+                    except Exception as exc:
+                        nonfatal_errors.append(f"unhide:{exc}")
+                    try:
+                        await page.wait_for_timeout(250)
+                    except Exception as exc:
+                        nonfatal_errors.append(f"post_unhide_wait:{exc}")
 
                 try:
                     dom_result = await extract_article_dom(page)

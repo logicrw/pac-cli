@@ -335,3 +335,25 @@ def test_doctor_uses_browser_launch_probe_result(monkeypatch):
     assert result["chromium_installed"] is False
     assert "Executable doesn't exist" in result["issues"]
     assert "playwright install chromium" in result["issues"]
+
+
+def test_explicit_batch_cookie_rejects_multiple_registrable_domains():
+    error = cli._explicit_batch_cookie_scope_error(
+        ["https://publisher.example/article", "https://other.example/article"],
+        "session=publisher-only",
+    )
+    assert "share one registrable domain" in error
+
+
+def test_explicit_batch_cookie_allows_same_registrable_domain():
+    assert cli._explicit_batch_cookie_scope_error(
+        ["https://example.com/a", "https://www.example.com/b"],
+        "session=publisher-only",
+    ) == ""
+
+
+def test_vault_backed_batch_has_no_explicit_cookie_scope_error():
+    assert cli._explicit_batch_cookie_scope_error(
+        ["https://publisher.example/a", "https://other.example/b"],
+        "",
+    ) == ""
