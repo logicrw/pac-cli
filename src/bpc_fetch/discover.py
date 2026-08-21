@@ -173,12 +173,15 @@ async def discover_articles(
 
             # Plain keyword queries hit Bing News RSS first: item links embed
             # the publisher URL (apiclick.aspx?...&url=<encoded>), so no Google
-            # News token decoding is needed at all.  Bing does not support the
-            # ``site:`` operator, so domain-scoped queries go to Google News.
-            bing_query = (search_query or target) if not scoped else search_query
+            # News token decoding is needed at all.  Bing News RSS also honours
+            # the ``site:`` operator (verified 2026-08), so scoped queries stay
+            # on Bing and keep the domain restriction.
+            bing_query = query if scoped else (search_query or target)
             if bing_query:
                 encoded_bing = urllib.parse.quote(bing_query)
-                bing_news_url = f"https://www.bing.com/news/search?q={encoded_bing}&format=rss"
+                bing_news_url = (
+                    "https://www.bing.com/news/search?q={encoded_bing}&format=rss&setmkt=en-US&setlang=en"
+                )
                 source_url = bing_news_url
                 try:
                     response = await diagnostic_get("bing_news", client, bing_news_url)
