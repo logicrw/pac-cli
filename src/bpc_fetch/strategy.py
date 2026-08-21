@@ -58,9 +58,15 @@ try:
 except ValueError:
     ARCHIVE_IS_COOLDOWN_S = 300.0
 _archive_is_fail_at: dict[str, float] = {}
+# Mirror family of archive.today: short-suffix hosts redirect among each
+# other, so including them all only widens availability when one is slow or
+# refusing connections.  archive.gf is dead and intentionally excluded.
 ARCHIVE_TODAY_HOSTS = tuple(
     host.strip().lower()
-    for host in os.environ.get("PAC_ARCHIVE_TODAY_HOSTS", "archive.today,archive.ph").split(",")
+    for host in os.environ.get(
+        "PAC_ARCHIVE_TODAY_HOSTS",
+        "archive.today,archive.ph,archive.vn,archive.md,archive.is,archive.li,archive.fo",
+    ).split(",")
     if host.strip()
 ) or ("archive.today", "archive.ph")
 WAYBACK_AVAILABLE_ENDPOINT = "https://archive.org/wayback/available"
@@ -103,6 +109,10 @@ class FetchOptions:
     force_archive: bool
     full_markdown: bool
     plan: Sequence[str]
+    # Caller-supplied cookie header (``--cookie`` / ``PAC_COOKIE_FILE``).
+    # Applied only to the target domain and archive.today mirror gateways,
+    # never to third-party reader gateways.
+    cookie_header: str = ""
 
 
 @dataclass
@@ -328,6 +338,7 @@ class DirectHttpHandler(AsyncHandler):
                             active_strategy,
                             context.client,
                             timeout=timeout,
+                            cookie_header=context.options.cookie_header,
                         )
             except SSRFBlocked as exc:
                 context.strategy_hit.append(label)
@@ -484,7 +495,9 @@ class StealthBrowserHandler(AsyncHandler):
         try:
             from .browser import fetch_for_strategy
 
-            browser_result = await fetch_for_strategy(context.url, context.strategy)
+            browser_result = await fetch_for_strategy(
+                context.url, context.strategy, cookie_header=context.options.cookie_header
+            )
         except Exception as exc:
             context.strategy_hit.extend(("browser_cleanup", "browser_cleanup_error"))
             context.add_warning(f"browser:{exc}")
@@ -772,6 +785,7 @@ class MultiGatewayArchiveHandler(AsyncHandler):
         strategy: SiteStrategy | None,
         *,
         timeout: float,
+        cookie_header: str = "",
     ) -> tuple[str, int]:
         from .browser import get_domain_rate_limiter
 
@@ -784,6 +798,7 @@ class MultiGatewayArchiveHandler(AsyncHandler):
                     strategy,
                     context.client,
                     timeout=timeout,
+                    cookie_header=cookie_header,
                 )
 
     async def _attempt_html_gateway(
@@ -796,13 +811,24 @@ class MultiGatewayArchiveHandler(AsyncHandler):
         failure_code: str,
     ) -> "_GatewayOutcome":
         started_at = time.perf_counter()
+        gateway_host = (urlparse(gateway_url).hostname or "").casefold().rstrip(".")
+        is_archive_today_mirror = gateway_host in ARCHIVE_TODAY_HOSTS or any(
+            gateway_host == host or gateway_host == f"www.{host}" for host in ARCHIVE_TODAY_HOSTS
+        )
+        # Caller cookies unlock the archive.today mirror family only; they are
+        # deliberately withheld from other gateways (reader proxies, wayback)
+        # to avoid leaking credentials to third parties.
+        gateway_cookie = (
+            context.options.cookie_header if (context.options.cookie_header and is_archive_today_mirror) else ""
+        )
         try:
             assert_public_url(gateway_url)
             html, status = await self._limited_fetch(
                 context,
                 gateway_url,
-                SiteStrategy(domain=urlparse(gateway_url).hostname or context.domain, useragent=""),
+                SiteStrategy(domain=gateway_host or context.domain, useragent=""),
                 timeout=TIMEOUT,
+                cookie_header=gateway_cookie,
             )
         except SSRFBlocked as exc:
             error_label = f"{label}_error"
@@ -949,6 +975,131 @@ class _GatewayOutcome:
     cooldown: bool = False
 
 
+class FirecrawlGatewayHandler(AsyncHandler):
+    """Terminal cloud fallback: hand the URL to the caller's Firecrawl fleet.
+
+    Runs last in every plan when ``PAC_FIRECRAWL_API_KEY`` / ``FIRECRAWL_API_KEY``
+    is set.  Local engines (HTTP, Camoufox, archives) fail on hard bot walls;
+    Firecrawl's cloud fleet routinely clears them, so a subscription turns the
+    tail of the chain into a high-coverage safety net.  Output still passes the
+    shared quality gate -- a failed scrape never masquerades as an article.
+    """
+
+    async def process(self, context: Context) -> dict[str, Any] | None:
+        api_key = os.environ.get("PAC_FIRECRAWL_API_KEY", "").strip() or os.environ.get(
+            "FIRECRAWL_API_KEY", ""
+        ).strip()
+        if not api_key:
+            return None
+
+        started_at = time.perf_counter()
+        label = "firecrawl_gateway"
+        api_url = "https://api.firecrawl.dev/v1/scrape"
+        try:
+            assert_public_url(api_url)
+            response = await context.client.post(
+                api_url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"url": context.url, "formats": ["markdown"], "onlyMainContent": False},
+                timeout=TIMEOUT,
+            )
+            status = int(response.status_code)
+        except SSRFBlocked as exc:
+            context.strategy_hit.append("firecrawl_gateway_error")
+            context.note_failure(
+                "SSRF_BLOCKED",
+                error=str(exc),
+                failure_class="config",
+                engine="firecrawl",
+            )
+            return None
+        except Exception as exc:
+            context.strategy_hit.append("firecrawl_gateway_error")
+            context.note_failure(
+                "NETWORK",
+                error=f"firecrawl_gateway:{exc}",
+                failure_class="network",
+                engine="firecrawl",
+            )
+            return None
+
+        context.strategy_hit.append("firecrawl_gateway")
+        context.record_attempt(
+            handler=self.__class__.__name__,
+            label=label,
+            engine="firecrawl",
+            status=status,
+            started_at=started_at,
+            error_code="",
+            error="",
+        )
+        if status != 200:
+            context.note_failure(
+                "ARCHIVE_FAILED",
+                error=f"firecrawl_gateway:HTTP {status}",
+                failure_class="network",
+                engine="firecrawl",
+            )
+            return None
+
+        try:
+            markdown = (response.json().get("data") or {}).get("markdown") or ""
+        except Exception:
+            markdown = ""
+        if not markdown.strip():
+            context.note_failure(
+                "EXTRACT_FAILED",
+                error="firecrawl_gateway:empty_markdown",
+                failure_class="extract",
+                engine="firecrawl",
+            )
+            return None
+
+        import html as _html_mod
+        import re as _re_mod
+
+        # Prefer the first markdown heading as the article title; fall back to
+        # the URL so the extractor always receives a well-formed shell.
+        title_match = _re_mod.search(r"^#\s+(.+)$", markdown, _re_mod.M)
+        fallback_title = (
+            title_match.group(1).strip() if title_match else context.url
+        )
+        body_html = (
+            "<!DOCTYPE html><html><head><title>"
+            + _html_mod.escape(fallback_title, quote=True)
+            + "</title></head><body><article><pre>"
+            + _html_mod.escape(markdown)
+            + "</pre></article></body></html>"
+        )
+        evaluation = await _evaluate_candidate(
+            body_html,
+            context.url,
+            context.domain,
+            dom_result=None,
+            allow_partial=context.options.allow_partial,
+            strategy_hit=context.strategy_hit,
+            rule_version=context.options.rule_version,
+            engine="firecrawl",
+            t0=context.started_at,
+            full_markdown=context.options.full_markdown,
+            warnings=context.warnings,
+        )
+        context.last_quality = evaluation.quality
+        if evaluation.result is not None:
+            context.strategy_hit.append("firecrawl_gateway_ok")
+            return evaluation.result
+        context.note_failure(
+            "QUALITY_GATE",
+            error="firecrawl_gateway:quality_gate",
+            failure_class="quality",
+            engine="firecrawl",
+        )
+        return None
+
+
 class ArchiveFallbackHandler(MultiGatewayArchiveHandler):
     """Backward-compatible Phase 2 class name for the composite archive handler."""
 
@@ -1037,6 +1188,10 @@ def build_headers(strategy: SiteStrategy | None) -> dict[str, str]:
             headers["Referer"] = REFERER_TWITTER
         elif not strategy.useragent and not strategy.useragent_custom:
             headers["Referer"] = REFERER_GOOGLE
+
+    cookie = _cookie_header(strategy)
+    if cookie and "Cookie" not in headers:
+        headers["Cookie"] = cookie
 
     if strategy.random_ip:
         headers["X-Forwarded-For"] = (
@@ -1225,6 +1380,29 @@ class _AdaptiveHttpClient:
             timeout=float(timeout),
         )
 
+    async def post(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        json: Any = None,
+        timeout: float = TIMEOUT,
+    ) -> Any:
+        """Plain httpx POST for JSON APIs (cloud scrape gateways).
+
+        curl_cffi impersonation is pointless against API endpoints and its
+        header rewriting can corrupt Bearer auth, so this path always uses a
+        stock httpx session without proxy steering.
+        """
+        httpx_session = await self._httpx_session(_AUTO_HTTP_PROXY)
+        self.last_transport = "httpx"
+        return await httpx_session.post(
+            url,
+            headers=dict(headers or {}),
+            json=json,
+            timeout=float(timeout),
+        )
+
     async def aclose(self) -> None:
         if self._curl is not None:
             await _close_async_client(self._curl)
@@ -1402,6 +1580,7 @@ async def fetch_page(
     client: httpx.AsyncClient | None = None,
     *,
     timeout: float = TIMEOUT,
+    cookie_header: str = "",
 ) -> tuple[str, int]:
     """Fetch HTML with SSRF-safe redirects, TLS impersonation, and proxy failover.
 
@@ -1412,7 +1591,7 @@ async def fetch_page(
 
     assert_public_url(url)
     headers = build_headers(strategy) if strategy else build_fallback_headers()
-    cookie_header = _cookie_header(strategy)
+    cookie_header = (cookie_header or "").strip() or _cookie_header(strategy)
     if cookie_header and "Cookie" not in headers:
         headers["Cookie"] = cookie_header
 
@@ -1660,6 +1839,9 @@ def _build_handler_chain(plan: Sequence[str]) -> AsyncHandler:
         handlers.append(StealthBrowserHandler())
     if any(step in {"archive_is", "archive_org"} for step in plan):
         handlers.append(MultiGatewayArchiveHandler())
+    # Terminal cloud fallback: active whenever the caller has a Firecrawl key,
+    # independent of the chosen plan.
+    handlers.append(FirecrawlGatewayHandler())
     if not handlers:
         handlers.append(DirectHttpHandler())
     for current, following in zip(handlers, handlers[1:]):
@@ -1684,6 +1866,7 @@ async def fetch_article(
     domain: str | None = None,
     diagnostics: bool = False,
     request_id: str | None = None,
+    cookie_header: str = "",
 ) -> dict[str, Any]:
     """Fetch and extract an article through the asynchronous handler chain."""
 
@@ -1738,6 +1921,7 @@ async def fetch_article(
         force_archive=force_archive,
         full_markdown=full_markdown,
         plan=plan,
+        cookie_header=(cookie_header or "").strip(),
     )
 
     own_client = client is None

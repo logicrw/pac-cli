@@ -74,7 +74,15 @@ _CHALLENGE_TITLE_RE = re.compile(
 
 _ACCESS_DENIED_TITLE_RE = re.compile(
     r"^(?:access denied|forbidden|request blocked|service unavailable|"
+    r"welcome to nginx|apache2 default|iis7|test page for|"
     r"拒绝访问|访问被拒绝|アクセスが拒否されました|접근이 거부되었습니다)\b",
+    re.IGNORECASE,
+)
+
+_DEFAULT_SERVER_PAGE_RE = re.compile(
+    r"nginx web server is successfully installed and working|"
+    r"this is the default welcome page used to test|"
+    r"apache2 ubuntu default page",
     re.IGNORECASE,
 )
 
@@ -134,9 +142,15 @@ def classify_access_control_page(
             re.I | re.S,
         )
     )
+    # Strong challenge signatures only. ``challenge-platform`` alone is NOT
+    # counted: Cloudflare injects that path into its always-on beacon script
+    # on ordinary fully-rendered articles (observed on theinformation.com),
+    # so it produced false positives on logged-in article pages.
     challenge_script = bool(
         re.search(
-            r"(?:challenge-platform|cdn-cgi/challenge|awswaf|px-captcha|captcha-delivery|"
+            r"(?:_cf_chl_opt|cf-chl-cfg|chl_page/orchestrate|"
+            r"cdn-cgi/challenge-platform/h/[a-z]/orchestrate|"
+            r"awswaf|px-captcha|captcha-delivery|"
             r"/challenge\.js|/captcha\.js)",
             raw,
             re.I,
@@ -150,6 +164,7 @@ def classify_access_control_page(
             re.I,
         )
     )
+    default_server_page = bool(_DEFAULT_SERVER_PAGE_RE.search(raw))
 
     visible_text = _normalize_space(re.sub(r"<[^>]+>", " ", raw))
     visible_chars = _meaningful_length(visible_text)
@@ -207,12 +222,13 @@ def classify_access_control_page(
         or (has_markup and provider == "akamai" and provider_hits >= 2 and score >= 3.6)
     )
     denied_evidence = bool(
-        title_is_denied
+        (title_is_denied or default_server_page)
         and visible_chars < 5000
         and (
             has_markup
             or status in {401, 403, 407, 429, 451}
             or denied_text
+            or default_server_page
         )
     )
     blocked = bool(

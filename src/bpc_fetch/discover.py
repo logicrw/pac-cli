@@ -167,23 +167,46 @@ async def discover_articles(
     ) as client:
         if search_query or not target.startswith("http"):
             domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+            domain = domain_from_url(target if target.startswith("http") else f"https://{target}")
+            scoped = bool(search_query) or "." in target
             query = f"site:{domain} {search_query}".strip() if search_query else f"site:{domain}"
-            encoded_query = urllib.parse.quote(query)
-            google_news_url = (
-                "https://news.google.com/rss/search?"
-                f"q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
-            )
-            source_url = google_news_url
-            try:
-                response = await diagnostic_get("google_news", client, google_news_url)
-                if response.status_code == 200:
-                    articles = _parse_rss(response.text, limit=effective_limit)
-                    if articles:
-                        articles = await _resolve_google_news_articles(articles, client)
-                        source_type = "google_news_rss"
-            except Exception as exc:
-                warnings.append(_discovery_warning("google_news", exc))
 
+            # Plain keyword queries hit Bing News RSS first: item links embed
+            # the publisher URL (apiclick.aspx?...&url=<encoded>), so no Google
+            # News token decoding is needed at all.  Bing does not support the
+            # ``site:`` operator, so domain-scoped queries go to Google News.
+            bing_query = (search_query or target) if not scoped else search_query
+            if bing_query:
+                encoded_bing = urllib.parse.quote(bing_query)
+                bing_news_url = f"https://www.bing.com/news/search?q={encoded_bing}&format=rss"
+                source_url = bing_news_url
+                try:
+                    response = await diagnostic_get("bing_news", client, bing_news_url)
+                    if response.status_code == 200:
+                        bing_articles = _parse_rss(response.text, limit=effective_limit)
+                        bing_articles = _extract_bing_publisher_urls(bing_articles)
+                        if bing_articles:
+                            articles = bing_articles
+                            source_type = "bing_news_rss"
+                except Exception as exc:
+                    warnings.append(_discovery_warning("bing_news", exc))
+
+            if not articles:
+                encoded_query = urllib.parse.quote(query)
+                google_news_url = (
+                    "https://news.google.com/rss/search?"
+                    f"q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+                )
+                source_url = google_news_url
+                try:
+                    response = await diagnostic_get("google_news", client, google_news_url)
+                    if response.status_code == 200:
+                        articles = _parse_rss(response.text, limit=effective_limit)
+                        if articles:
+                            articles = await _resolve_google_news_articles(articles, client)
+                            source_type = "google_news_rss"
+                except Exception as exc:
+                    warnings.append(_discovery_warning("google_news", exc))
         if not articles:
             if target.startswith("http://") or target.startswith("https://"):
                 base_url = target.rstrip("/")
@@ -556,6 +579,35 @@ async def _resolve_google_news_articles(
             output[index]["url"] = await resolve_google_news_url(original_url, client=client)
 
     await asyncio.gather(*(resolve_one(index) for index in encoded_indexes))
+    return output
+
+
+def _extract_bing_publisher_urls(
+    articles: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Rewrite Bing News RSS links to their publisher URLs.
+
+    Bing item links look like
+    ``http://www.bing.com/news/apiclick.aspx?...&url=<percent-encoded target>&...``.
+    The encoded ``url`` parameter points straight at the publisher article.
+    Items without it (internal Bing pages) are dropped.
+    """
+    import urllib.parse as _up
+
+    output: list[dict[str, str]] = []
+    for article in articles:
+        link = article.get("url", "")
+        if "bing.com" not in _up.urlsplit(link).netloc:
+            output.append(article)
+            continue
+        query = _up.urlsplit(link).query
+        params = _up.parse_qs(query)
+        candidates = params.get("url") or []
+        publisher = candidates[0] if candidates else ""
+        if publisher.startswith("http") and "bing.com" not in _up.urlsplit(publisher).netloc:
+            rewritten = dict(article)
+            rewritten["url"] = publisher
+            output.append(rewritten)
     return output
 
 

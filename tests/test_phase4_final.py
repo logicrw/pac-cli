@@ -79,7 +79,7 @@ def test_browser_proxy_pool_rotates_on_network_failure(monkeypatch):
 
     monkeypatch.setattr(browser, "resolve_proxy_candidates", lambda *a, **k: [p1, p2])
 
-    async def fake_single(url, strategy, pool=None, *, proxy_override):
+    async def fake_single(url, strategy, pool=None, *, proxy_override, cookie_header=""):
         calls.append(proxy_override.server)
         if proxy_override == p1:
             return browser.BrowserResult(ok=False, error_code="NETWORK", error_msg="connect failed")
