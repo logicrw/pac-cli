@@ -2,6 +2,15 @@
 
 All notable changes to PAC are documented here.
 
+## Unreleased
+
+- **On-demand interactive fetch**: `pac fetch URL --interactive` extracts an
+  authorized article through Ego lite (Bypass Paywalls Clean stays in the
+  browser). PAC may launch Ego lite if needed, uses a dedicated task space,
+  concurrency 1, and never copies cookies into PAC. This path is not part of
+  `pac batch`. Chrome/DrissionPage attach remains opt-in via
+  `PAC_INTERACTIVE_BACKEND=drissionpage`.
+
 ## 0.2.2 (Permanent Architectural Freeze)
 
 ### Phase 5: Final Production Consolidation
