@@ -455,6 +455,26 @@ def assert_dedicated_profile(path: Path | str | None) -> Path:
     return resolved
 
 
+def _require_public_article_url(candidate: str) -> None:
+    target = (candidate or "").strip()
+    scheme = (urlparse(target).scheme or "").casefold()
+    if scheme not in {"http", "https"}:
+        raise InteractiveError(
+            f"interactive extract landed on a non-http URL ({scheme or 'none'})",
+            error_code="BROWSER_UNAVAILABLE",
+            recovery_hint="retry; the Ego tab had not finished navigating to the article",
+        )
+    try:
+        assert_public_url(target)
+    except SSRFBlocked as exc:
+        raise InteractiveError(
+            str(exc),
+            error_code="SSRF_BLOCKED",
+            failure_class="config",
+            recovery_hint="interactive extract still requires a public http(s) article URL",
+        ) from exc
+
+
 def reject_cookie_header(cookie_header: str | None) -> None:
     if (cookie_header or "").strip():
         raise InteractiveCookieRejected(
@@ -908,6 +928,15 @@ let error = ''
 try {{
   const tab = await createTab(url)
   owned = String(tab && tab.targetId || '')
+  const navDeadline = Date.now() + timeoutS * 1000
+  while (Date.now() < navDeadline) {{
+    try {{
+      const info = await pageInfo()
+      const href = String(info && info.url || '')
+      if (/^https?:\\/\\//i.test(href)) break
+    }} catch (_) {{}}
+    await wait(0.2)
+  }}
   const deadline = Date.now() + Math.min(2000, timeoutS * 1000)
   while (Date.now() < deadline) {{
     try {{
@@ -1142,18 +1171,12 @@ async def fetch_interactive(
     from .strategy import _evaluate_candidate, _quality_failure
 
     try:
-        assert_public_url(snapshot.final_url or url)
-    except SSRFBlocked as exc:
-        wrapped = InteractiveError(
-            str(exc),
-            error_code="SSRF_BLOCKED",
-            failure_class="config",
-            recovery_hint="interactive extract still requires a public http(s) article URL",
-        )
+        _require_public_article_url(snapshot.final_url or url)
+    except InteractiveError as exc:
         return redact_secrets(_fail(
             url=url,
             domain=domain,
-            exc=wrapped,
+            exc=exc,
             settings=settings,
             backend=backend_name,
             started_at=started_at,

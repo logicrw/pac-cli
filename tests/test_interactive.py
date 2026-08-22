@@ -360,6 +360,20 @@ def test_ssrf_still_applies(tmp_path):
     assert backend.calls == []
 
 
+def test_chrome_extension_final_url_is_not_ssrf():
+    class FakeEgo(FakeBackend):
+        name = BACKEND_EGO
+
+    backend = FakeEgo(_snapshot(final_url="chrome-extension://nggfkk/newtab.html"))
+    result = asyncio.run(fetch_interactive(
+        "https://www.ft.com/content/abc",
+        backend=backend,
+    ))
+    assert result["ok"] is False
+    assert result["error_code"] == "BROWSER_UNAVAILABLE"
+    assert result["error_code"] != "SSRF_BLOCKED"
+
+
 def test_redirected_final_url_ssrf_is_rejected(tmp_path):
     backend = FakeBackend(_snapshot(final_url="http://127.0.0.1/metadata"))
     result = asyncio.run(fetch_interactive(
