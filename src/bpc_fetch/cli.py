@@ -92,6 +92,12 @@ def main():
     p_batch.add_argument("--file", type=Path, default=None)
     p_batch.add_argument("--out-dir", type=Path, default=None)
     p_batch.add_argument("--concurrency", type=int, default=2)
+    p_batch.add_argument(
+        "--cloud-max-calls",
+        type=int,
+        default=0,
+        help="Maximum Firecrawl calls across this batch (default 0)",
+    )
     p_batch.add_argument("--max", type=int, default=10, help="Default cap 10, hard 25")
     p_batch.add_argument("--allow-partial", action="store_true")
     p_batch.add_argument("--full", action="store_true")
@@ -110,6 +116,14 @@ def main():
     c_import = csub.add_parser("import", help="Import cookies for a domain from a local Chromium-based browser (macOS)", parents=[_common])
     c_import.add_argument("domain", help="Target registrable domain, e.g. theinformation.com")
     c_import.add_argument("--browser", default="auto", help="Browser profile: auto (Dia/Chrome/Arc/Edge), or an explicit 'User Data' dir")
+
+    p_feeds = sub.add_parser("feeds", help="Inspect curated source feed health", parents=[_common])
+    fsub = p_feeds.add_subparsers(dest="feeds_cmd")
+    f_health = fsub.add_parser("health", help="Probe public RSS/Atom feeds without credentials", parents=[_common])
+    f_health.add_argument("--domains", default="", help="Comma-separated curated domains; default all 29")
+    f_health.add_argument("--concurrency", type=int, default=4)
+    f_health.add_argument("--out", type=Path, default=None, help="Write the JSON health report to this path")
+
     p_discover = sub.add_parser("discover", help="Discover recent articles from domain or RSS", parents=[_common])
     p_discover.add_argument("target", help="Domain, RSS URL, or news topic query")
     p_discover.add_argument("--query", "-q", type=str, default=None, help="Search keyword filter")
@@ -176,6 +190,8 @@ async def _dispatch(args) -> dict:
         return await _cmd_rules(args)
     if args.command == "cookies":
         return _cmd_cookies(args)
+    if args.command == "feeds":
+        return await _cmd_feeds(args)
     return {
         "ok": False,
         "error_code": "INTERNAL",
@@ -480,7 +496,7 @@ async def _cmd_batch(args) -> dict:
 
     from .rules.store import get_sites_map_with_version
     from .rules.sync import maybe_sync_rules, swr_nonblocking_mode
-    from .strategy import fetch_article
+    from .strategy import CloudBudget, fetch_article
 
     urls = list(args.urls or [])
     if (
@@ -548,6 +564,16 @@ async def _cmd_batch(args) -> dict:
             "error": f"concurrency must be between 1 and {hard_cap}",
             "strategy_hit": [],
         }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
+    cloud_max_calls = int(getattr(args, "cloud_max_calls", 0) or 0)
+    if cloud_max_calls < 0:
+        return _attach_command_diagnostics({
+            "ok": False,
+            "error_code": "LIMIT_EXCEEDED",
+            "failure_class": "config",
+            "error": "cloud-max-calls must be non-negative",
+            "strategy_hit": [],
+        }, enabled=diagnostics_enabled, request_id=batch_request_id, started_at=started_at)
+    cloud_budget = CloudBudget(cloud_max_calls)
     sem = aio.Semaphore(concurrency)
     results = []
 
@@ -565,6 +591,7 @@ async def _cmd_batch(args) -> dict:
                 diagnostics=diagnostics_enabled,
                 request_id=(f"{batch_request_id}-{index + 1}" if diagnostics_enabled else None),
                 cookie_header=explicit_cookie_header,
+                cloud_budget=cloud_budget,
             )
             r.pop("_image_urls", None)
             markdown = r.get("markdown") or ""
@@ -602,6 +629,38 @@ async def _cmd_batch(args) -> dict:
             items=zip(urls, results),
         )
     return result
+
+
+async def _cmd_feeds(args) -> dict:
+    """Probe registered public feeds without credentials or article fetches."""
+    from .feed_health import health_report_as_dict, validate_registered_feeds
+
+    command = getattr(args, "feeds_cmd", "")
+    if command != "health":
+        return {
+            "ok": False,
+            "error_code": "USAGE",
+            "failure_class": "config",
+            "error": "usage: pac feeds health [--domains domain1,domain2]",
+            "strategy_hit": [],
+        }
+    domains = tuple(
+        value.strip().casefold().removeprefix("www.")
+        for value in str(getattr(args, "domains", "")).split(",")
+        if value.strip()
+    )
+    reports = await validate_registered_feeds(
+        domains or None,
+        concurrency=max(1, int(getattr(args, "concurrency", 4))),
+    )
+    payload = health_report_as_dict(reports)
+    payload.update({"ok": True, "domains": list(domains)})
+    out_path = getattr(args, "out", None)
+    if out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        payload["path"] = str(out_path)
+    return payload
 
 
 def _cmd_cookies(args) -> dict:

@@ -1,0 +1,594 @@
+{
+  "schema_version": 1,
+  "purpose": "Per-source discovery policy for PAC final 29 selected outlets.",
+  "policies": [
+    {
+      "domain": "bloomberg.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.bloomberg.com/feeds/markets/news.rss",
+        "https://www.bloomberg.com/feeds/business/news.rss",
+        "https://www.bloomberg.com/feeds/economics/news.rss",
+        "https://www.bloomberg.com/feeds/industries/news.rss",
+        "https://www.bloomberg.com/feeds/politics/news.rss",
+        "https://www.bloomberg.com/feeds/technology/news.rss"
+      ],
+      "focus_feed_urls": [
+        "https://www.bloomberg.com/feeds/markets/news.rss",
+        "https://www.bloomberg.com/feeds/business/news.rss",
+        "https://www.bloomberg.com/feeds/economics/news.rss",
+        "https://www.bloomberg.com/feeds/technology/news.rss"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "reuters.com",
+      "discovery_mode": "firecrawl_daily_sitemap",
+      "feed_urls": [],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "utc_sitemap_date",
+      "coverage": "finance_technology_daily_sitemap",
+      "reason": "public_reuters_sitemap_requires_cloud_discovery"
+    },
+    {
+      "domain": "wsj.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+        "https://feeds.content.dowjones.io/public/rss/RSSWorldNews",
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+        "https://feeds.a.dj.com/rss/RSSWSJD.xml",
+        "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
+        "https://feeds.content.dowjones.io/public/rss/RSSOpinion",
+        "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness",
+        "https://feeds.content.dowjones.io/public/rss/RSSWSJD",
+        "https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed"
+      ],
+      "focus_feed_urls": [
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+        "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
+        "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "ft.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.ft.com/companies?format=rss",
+        "https://www.ft.com/markets?format=rss",
+        "https://www.ft.com/opinion?format=rss",
+        "https://www.ft.com/technology?format=rss",
+        "https://www.ft.com/world?format=rss",
+        "https://www.ft.com/rss/home/international",
+        "https://www.ft.com/artificial-intelligence?format=rss"
+      ],
+      "focus_feed_urls": [
+        "https://www.ft.com/companies?format=rss",
+        "https://www.ft.com/markets?format=rss",
+        "https://www.ft.com/technology?format=rss",
+        "https://www.ft.com/artificial-intelligence?format=rss"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "economist.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.economist.com/asia/rss.xml",
+        "https://www.economist.com/briefing/rss.xml",
+        "https://www.economist.com/britain/rss.xml",
+        "https://www.economist.com/business/rss.xml",
+        "https://www.economist.com/china/rss.xml",
+        "https://www.economist.com/europe/rss.xml",
+        "https://www.economist.com/finance-and-economics/rss.xml",
+        "https://www.economist.com/international/rss.xml",
+        "https://www.economist.com/leaders/rss.xml",
+        "https://www.economist.com/middle-east-and-africa/rss.xml",
+        "https://www.economist.com/science-and-technology/rss.xml",
+        "https://www.economist.com/the-americas/rss.xml",
+        "https://www.economist.com/united-states/rss.xml"
+      ],
+      "focus_feed_urls": [
+        "https://www.economist.com/asia/rss.xml",
+        "https://www.economist.com/briefing/rss.xml",
+        "https://www.economist.com/britain/rss.xml",
+        "https://www.economist.com/business/rss.xml",
+        "https://www.economist.com/china/rss.xml",
+        "https://www.economist.com/europe/rss.xml",
+        "https://www.economist.com/finance-and-economics/rss.xml",
+        "https://www.economist.com/international/rss.xml",
+        "https://www.economist.com/leaders/rss.xml",
+        "https://www.economist.com/middle-east-and-africa/rss.xml",
+        "https://www.economist.com/science-and-technology/rss.xml",
+        "https://www.economist.com/the-americas/rss.xml",
+        "https://www.economist.com/united-states/rss.xml"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "cnbc.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147",
+        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        "https://www.cnbc.com/id/19854910/device/rss/rss.html"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "fortune.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://content.fortune.com/feed/",
+        "https://content.fortune.com/feed/atom/",
+        "https://fortune.com/feed/fortune-feeds/?id=3230629",
+        "https://fortune.com/feed/fortune-feeds/?id=3230629&paged=2"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "forbes.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.forbes.com/business/feed/",
+        "https://www.forbes.com/innovation/feed/"
+      ],
+      "focus_feed_urls": [
+        "https://www.forbes.com/business/feed/"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "marketwatch.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+        "https://feeds.content.dowjones.io/public/rss/mw_bulletins",
+        "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines"
+      ],
+      "focus_feed_urls": [
+        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "barrons.com",
+      "discovery_mode": "bing_site",
+      "feed_urls": [],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "not_applicable",
+      "coverage": "search_index_fallback",
+      "reason": "no_public_feed_configured"
+    },
+    {
+      "domain": "businessinsider.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://feeds.businessinsider.com/custom/all",
+        "https://markets.businessinsider.com/rss/news"
+      ],
+      "focus_feed_urls": [
+        "https://feeds.businessinsider.com/custom/all",
+        "https://markets.businessinsider.com/rss/news"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "techcrunch.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://techcrunch.com/feed/",
+        "https://techcrunch.com/feed/atom/",
+        "https://techcrunch.com/category/apps/feed/",
+        "https://techcrunch.com/category/artificial-intelligence/feed/",
+        "https://techcrunch.com/category/fintech/feed/",
+        "https://techcrunch.com/category/security/feed/",
+        "https://techcrunch.com/category/space/feed/",
+        "https://techcrunch.com/category/transportation/feed/",
+        "https://techcrunch.com/category/gadgets/feed/",
+        "https://techcrunch.com/category/venture/feed/",
+        "https://techcrunch.com/category/startups/feed/"
+      ],
+      "focus_feed_urls": [
+        "https://techcrunch.com/feed/",
+        "https://techcrunch.com/feed/atom/",
+        "https://techcrunch.com/category/apps/feed/",
+        "https://techcrunch.com/category/artificial-intelligence/feed/",
+        "https://techcrunch.com/category/fintech/feed/",
+        "https://techcrunch.com/category/security/feed/",
+        "https://techcrunch.com/category/space/feed/",
+        "https://techcrunch.com/category/transportation/feed/",
+        "https://techcrunch.com/category/gadgets/feed/",
+        "https://techcrunch.com/category/venture/feed/",
+        "https://techcrunch.com/category/startups/feed/"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "theverge.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.theverge.com/rss/index.xml",
+        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+        "https://www.theverge.com/rss/policy/index.xml",
+        "https://www.theverge.com/rss/reviews/index.xml",
+        "https://www.theverge.com/rss/science/index.xml",
+        "https://www.theverge.com/rss/tech/index.xml"
+      ],
+      "focus_feed_urls": [
+        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+        "https://www.theverge.com/rss/tech/index.xml"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "wired.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.wired.com/feed/rss",
+        "https://www.wired.com/feed/category/backchannel/latest/rss",
+        "https://www.wired.com/feed/category/business/latest/rss",
+        "https://www.wired.com/feed/category/culture/latest/rss",
+        "https://www.wired.com/feed/category/gear/latest/rss",
+        "https://www.wired.com/feed/category/ideas/latest/rss",
+        "https://www.wired.com/feed/category/science/latest/rss",
+        "https://www.wired.com/feed/category/security/latest/rss",
+        "https://www.wired.com/feed/tag/wired-guide/latest/rss",
+        "https://www.wired.com/feed/tag/ai/latest/rss",
+        "https://www.wired.com/feed"
+      ],
+      "focus_feed_urls": [
+        "https://www.wired.com/feed/category/business/latest/rss",
+        "https://www.wired.com/feed/category/security/latest/rss",
+        "https://www.wired.com/feed/tag/ai/latest/rss"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "arstechnica.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://feeds.arstechnica.com/arstechnica/index",
+        "https://feeds.arstechnica.com/arstechnica/apple",
+        "https://feeds.arstechnica.com/arstechnica/business",
+        "https://feeds.arstechnica.com/arstechnica/gadgets",
+        "https://feeds.arstechnica.com/arstechnica/gaming",
+        "https://feeds.arstechnica.com/arstechnica/science",
+        "https://feeds.arstechnica.com/arstechnica/tech-policy",
+        "https://feeds.arstechnica.com/arstechnica/technology-lab"
+      ],
+      "focus_feed_urls": [
+        "https://feeds.arstechnica.com/arstechnica/business",
+        "https://feeds.arstechnica.com/arstechnica/tech-policy",
+        "https://feeds.arstechnica.com/arstechnica/technology-lab"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "technologyreview.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.technologyreview.com/feed/atom",
+        "https://www.technologyreview.com/feed/rss",
+        "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+        "https://www.technologyreview.com/topic/computing/feed/",
+        "https://www.technologyreview.com/feed"
+      ],
+      "focus_feed_urls": [
+        "https://www.technologyreview.com/feed/atom",
+        "https://www.technologyreview.com/feed/rss",
+        "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+        "https://www.technologyreview.com/topic/computing/feed/",
+        "https://www.technologyreview.com/feed"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "theinformation.com",
+      "discovery_mode": "sitemap_articles",
+      "feed_urls": [
+        "https://www.theinformation.com/sitemap-articles.xml"
+      ],
+      "focus_feed_urls": [
+        "https://www.theinformation.com/sitemap-articles.xml"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_article_sitemap_feed_http_403"
+    },
+    {
+      "domain": "venturebeat.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://venturebeat.com/feed",
+        "https://venturebeat.com/category/ai/feed",
+        "https://venturebeat.com/category/security/feed"
+      ],
+      "focus_feed_urls": [
+        "https://venturebeat.com/feed",
+        "https://venturebeat.com/category/ai/feed",
+        "https://venturebeat.com/category/security/feed"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "fastcompany.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.fastcompany.com/technology/rss",
+        "https://feeds.feedburner.com/fastcompany/headlines",
+        "https://www.fastcompany.com/latest/rss"
+      ],
+      "focus_feed_urls": [
+        "https://www.fastcompany.com/technology/rss",
+        "https://feeds.feedburner.com/fastcompany/headlines",
+        "https://www.fastcompany.com/latest/rss"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "politico.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://rss.politico.com/congress.xml",
+        "https://rss.politico.com/politics-news.xml",
+        "https://rss.politico.com/technology.xml"
+      ],
+      "focus_feed_urls": [
+        "https://rss.politico.com/technology.xml"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "asia.nikkei.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://asia.nikkei.com/rss/feed/nar"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "missing",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "semafor.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.semafor.com/rss.xml"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "nytimes.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+      ],
+      "focus_feed_urls": [
+        "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "washingtonpost.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://feeds.washingtonpost.com/rss/national",
+        "https://feeds.washingtonpost.com/rss/world",
+        "https://feeds.washingtonpost.com/rss/politics",
+        "https://feeds.washingtonpost.com/rss/business",
+        "https://feeds.washingtonpost.com/rss/opinions"
+      ],
+      "focus_feed_urls": [
+        "https://feeds.washingtonpost.com/rss/business"
+      ],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "axios.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://api.axios.com/feed/",
+        "https://www.axios.com/feeds/feed.rss"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "scmp.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.scmp.com/rss/91/feed",
+        "https://www.scmp.com/rss/36/feed",
+        "https://www.scmp.com/rss/4/feed",
+        "https://www.scmp.com/rss/2/feed",
+        "https://www.scmp.com/rss/92/feed"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "theregister.com",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.theregister.com/headlines.atom",
+        "https://www.theregister.com/headlines.rss"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "404media.co",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://www.404media.co/feed",
+        "https://www.404media.co/rss"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    },
+    {
+      "domain": "sifted.eu",
+      "discovery_mode": "all_verified_feeds",
+      "feed_urls": [
+        "https://sifted.eu/feed"
+      ],
+      "focus_feed_urls": [],
+      "fallbacks": [
+        "bing_site"
+      ],
+      "date_quality": "present",
+      "coverage": "all_selected_outlet_news",
+      "reason": "public_feed_health_pass"
+    }
+  ]
+}

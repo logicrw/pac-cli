@@ -357,3 +357,23 @@ def test_vault_backed_batch_has_no_explicit_cookie_scope_error():
         ["https://publisher.example/a", "https://other.example/b"],
         "",
     ) == ""
+
+
+def test_feeds_health_command_normalizes_requested_domains(monkeypatch):
+    calls = []
+
+    async def fake_validate(domains, *, concurrency):
+        calls.append((domains, concurrency))
+        return ()
+
+    monkeypatch.setattr("bpc_fetch.feed_health.validate_registered_feeds", fake_validate)
+    result = asyncio.run(
+        cli._cmd_feeds(
+            SimpleNamespace(feeds_cmd="health", domains="www.ft.com, wsj.com", concurrency=3, out=None)
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["source_count"] == 0
+    assert result["domains"] == ["ft.com", "wsj.com"]
+    assert calls == [(("ft.com", "wsj.com"), 3)]
