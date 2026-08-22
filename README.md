@@ -8,7 +8,7 @@ Fetch paywalled / news articles as **Markdown** via an Agent-friendly **CLI**.
 |--|--|
 | **Local** | `~/Projects/pac-cli` |
 | **GitHub** | https://github.com/logicrw/pac-cli (fork of bpc-fetch) |
-| **Phase 1 license** | `docs/IMPLEMENTATION.md` §15 (approved 2026-07-29) |
+| **Sources** | 29 curated finance/tech outlets; see `docs/CURATED_SOURCE_MIGRATION.md` |
 
 ## Install
 
@@ -35,6 +35,9 @@ pac fetch "https://www.wsj.com/..." --compact
 pac fetch "https://www.wsj.com/articles/example" --diagnostics --compact
 pac fetch "https://www.wsj.com/..." --no-rule-sync --compact
 pac fetch "https://www.wsj.com/..." --out-dir articles --images --compact
+pac fetch "https://www.ft.com/..." --interactive --compact
+pac discover ft.com --limit 8 --compact
+pac feeds health --concurrency 4 --compact
 pac batch --file urls.txt --out-dir articles --max 10 --compact
 python scripts/audit_rule_coverage.py --compact
 ```
@@ -44,6 +47,9 @@ python scripts/audit_rule_coverage.py --compact
 - Image downloads are opt-in with `fetch --images` and require `--out-dir`.
 - `pac doctor` launches Chromium to verify the executable, not only the Python package.
 - Teaser/paywall text → `ok: false` unless `--allow-partial`.
+- `fetch --interactive` is on-demand Ego lite extraction for authorized sessions
+  (Bypass Paywalls Clean stays in Ego). It is not used by `batch`. PAC may open
+  Ego lite if it is installed and not running; cookies are not copied into PAC.
 
 ### Automatic rule maintenance
 
@@ -82,7 +88,8 @@ docker run --rm logicrw/pac-cli doctor --compact
 
 ## Docs
 
-- [Architecture Design & Pipeline](docs/ARCHITECTURE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [29-source discovery/retrieval](docs/CURATED_SOURCE_MIGRATION.md)
 
 
 ## Diagnostics

@@ -86,6 +86,22 @@ def main():
         default=None,
         help="File containing a cookie header (curl -c style Netscape cookies.txt or raw header)",
     )
+    p_fetch.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Extract via Ego lite task space (BPC stays in Ego); not used by batch",
+    )
+    p_fetch.add_argument(
+        "--interactive-profile",
+        type=Path,
+        default=None,
+        help="Chrome user-data-dir for PAC_INTERACTIVE_BACKEND=drissionpage (never Chrome Default)",
+    )
+    p_fetch.add_argument(
+        "--cdp",
+        default=None,
+        help="Loopback CDP host:port for drissionpage backend (default 127.0.0.1:9222)",
+    )
 
     p_batch = sub.add_parser("batch", help="Batch fetch (default summary only)", parents=[_common])
     p_batch.add_argument("urls", nargs="*", help="URLs")
@@ -436,19 +452,33 @@ async def _cmd_fetch(args) -> dict:
     elif getattr(args, "use_browser", None):
         use_browser = True
 
-    result = await fetch_article(
-        args.url,
-        strategy,
-        allow_partial=bool(getattr(args, "allow_partial", False)),
-        rule_version=ver,
-        force_archive=bool(getattr(args, "archive", False)),
-        full_markdown=bool(getattr(args, "full", False) or args.out_dir),
-        use_browser=use_browser,
-        domain=domain,
-        diagnostics=diagnostics_enabled,
-        request_id=request_id or None,
-        cookie_header=_resolve_cookie_header(args),
-    )
+    cookie_header = _resolve_cookie_header(args)
+    fetch_kwargs = {
+        "allow_partial": bool(getattr(args, "allow_partial", False)),
+        "rule_version": ver,
+        "full_markdown": bool(getattr(args, "full", False) or args.out_dir),
+        "diagnostics": diagnostics_enabled,
+        "request_id": request_id or None,
+        "cookie_header": cookie_header,
+    }
+    if getattr(args, "interactive", False):
+        from .interactive import fetch_interactive
+
+        result = await fetch_interactive(
+            args.url,
+            profile=getattr(args, "interactive_profile", None),
+            cdp=getattr(args, "cdp", None),
+            **fetch_kwargs,
+        )
+    else:
+        result = await fetch_article(
+            args.url,
+            strategy,
+            force_archive=bool(getattr(args, "archive", False)),
+            use_browser=use_browser,
+            domain=domain,
+            **fetch_kwargs,
+        )
     image_urls = result.pop("_image_urls", [])
     result["warnings"] = list(dict.fromkeys(list(result.get("warnings") or []) + list(warnings)))
     result["latency_ms"] = int((time.perf_counter() - t0) * 1000)

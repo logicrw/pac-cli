@@ -1,1 +1,1 @@
-"""bpc-fetch: bypass paywall sites search and fetch CLI."""
+"""PAC: discover and fetch news articles as Markdown for personal research."""
