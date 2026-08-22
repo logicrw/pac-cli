@@ -50,6 +50,11 @@ verified official feed (scope must match query)
 Candidate feeds do not create network calls. They are a review queue, not a
 production allowlist.
 
+Feed health does not imply full text. Retrieval is governed by
+`source_retrieval_policies.json`. For FT/Bloomberg-class authorized sessions,
+`pac fetch --interactive` is the on-demand Ego lite path and is not part of
+`pac batch`.
+
 ## Evidence
 
 - `news-scraper-final/sources.yaml` (current working registry, read 2026-08-22)
