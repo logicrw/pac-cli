@@ -8,6 +8,8 @@ gate before the pipeline short-circuits.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import inspect
 import json
 import os
@@ -34,6 +36,7 @@ from .quality import (
 from .result import (
     attach_diagnostics, classify_http_failure, fail_result, new_request_id, ok_result,
 )
+from .retrieval_policy import may_use_yahoo_bloomberg_representation
 from .sites import SiteStrategy, domain_from_url
 from .ssrf import SSRFBlocked, assert_public_url
 
@@ -99,6 +102,22 @@ _FAILURE_CLASS_BY_CODE = {
 }
 
 
+@dataclass
+class CloudBudget:
+    """Concurrency-safe cap for paid cloud fallback attempts."""
+
+    max_calls: int
+    used_calls: int = 0
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+    async def try_consume(self) -> bool:
+        async with self._lock:
+            if self.used_calls >= max(0, self.max_calls):
+                return False
+            self.used_calls += 1
+            return True
+
+
 @dataclass(frozen=True)
 class FetchOptions:
     """Immutable options consumed by the handler chain."""
@@ -116,6 +135,9 @@ class FetchOptions:
     # target's registrable domain.
     cookie_header: str = ""
     use_cookie_vault: bool = True
+    article_title: str = ""
+    article_published_at: str = ""
+    cloud_budget: CloudBudget = field(default_factory=lambda: CloudBudget(1))
 
 
 @dataclass
@@ -606,6 +628,163 @@ class StealthBrowserHandler(AsyncHandler):
         return None
 
 
+def _parse_discovery_datetime(value: str) -> datetime | None:
+    """Parse RSS or extracted publication metadata into an aware UTC datetime."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        parsed = None
+    if parsed is None:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _resolve_bloomberg_hint(context: Context):
+    """Resolve original metadata from discovery context or local response HTML.
+
+    A blocked Bloomberg URL must not be reverse-engineered from a slug or a
+    fuzzy search result. The caller should pass the title/date it received from
+    the publisher Feed when it wants syndicated fallback eligibility.
+    """
+    from .extract import extract_article
+    from .syndication import ArticleHint
+
+    hint = ArticleHint(
+        canonical_url=context.url,
+        title=context.options.article_title,
+        published_at=_parse_discovery_datetime(context.options.article_published_at),
+    )
+    if hint.title and hint.published_at is not None:
+        return hint
+
+    original = extract_article(context.last_html, context.url)
+    hint = ArticleHint(
+        canonical_url=context.url,
+        title=original.get("title", ""),
+        published_at=_parse_discovery_datetime(original.get("date", "")),
+    )
+    if hint.title and hint.published_at is not None:
+        return hint
+    return None
+
+
+async def _resolve_yahoo_bloomberg_document(context: Context):
+    """Return one validated Yahoo representation and its HTML, or ``None``.
+
+    This lookup is credential-free. The shared candidate evaluator remains the
+    sole authority for article quality after a representation is found.
+    """
+    from .discover import discover_articles
+    from .extract import extract_article
+    from .syndication import (
+        YahooSyndicationCandidate,
+        validate_yahoo_bloomberg_candidate,
+    )
+
+    original_hint = _resolve_bloomberg_hint(context)
+    if original_hint is None:
+        context.add_warning("yahoo_syndication:missing_original_metadata")
+        return None
+
+    context.strategy_hit.append("yahoo_syndication_lookup")
+    discovery = await discover_articles(
+        "finance.yahoo.com",
+        search_query=original_hint.title,
+        limit=5,
+    )
+    for discovered in discovery.get("articles", []):
+        candidate_url = str(discovered.get("url") or "")
+        if not candidate_url:
+            continue
+        try:
+            html, status = await fetch_page(
+                candidate_url,
+                SiteStrategy(domain="finance.yahoo.com", useragent=""),
+                context.client,
+                timeout=TIMEOUT,
+                cookie_header="",
+            )
+        except Exception:
+            continue
+        if status < 200 or status >= 300 or not html:
+            continue
+
+        candidate_article = extract_article(html, candidate_url)
+        candidate = YahooSyndicationCandidate(
+            url=candidate_url,
+            title=candidate_article.get("title", ""),
+            published_at=(
+                _parse_discovery_datetime(candidate_article.get("date", ""))
+                or _parse_discovery_datetime(str(discovered.get("published") or ""))
+            ),
+            attribution_text=candidate_article.get("text", ""),
+        )
+        representation = validate_yahoo_bloomberg_candidate(original_hint, candidate)
+        if representation is not None:
+            return representation, html
+    return None
+
+
+class YahooSyndicationHandler(AsyncHandler):
+    """Resolve eligible Bloomberg failures to attributed Yahoo representations."""
+
+    _ELIGIBLE_FAILURES = frozenset({"PAYWALL_REMAINING", "BOT_CHALLENGE", "HTTP_BLOCKED"})
+
+    async def process(self, context: Context) -> dict[str, Any] | None:
+        if (
+            context.domain != "bloomberg.com"
+            or context.best_error_code not in self._ELIGIBLE_FAILURES
+            or not may_use_yahoo_bloomberg_representation(context.domain)
+        ):
+            return None
+
+        resolved = await _resolve_yahoo_bloomberg_document(context)
+        if resolved is None:
+            context.strategy_hit.append("syndication_yahoo_miss")
+            return None
+        representation, html = resolved
+        evaluation = await _evaluate_candidate(
+            html,
+            representation.representation_url,
+            "finance.yahoo.com",
+            dom_result=None,
+            allow_partial=False,
+            strategy_hit=context.strategy_hit,
+            rule_version=context.options.rule_version,
+            engine="yahoo_syndication",
+            t0=context.started_at,
+            full_markdown=context.options.full_markdown,
+            warnings=context.warnings,
+        )
+        context.last_quality = evaluation.quality
+        if evaluation.result is None:
+            context.strategy_hit.append("syndication_yahoo_miss")
+            return None
+
+        result = evaluation.result
+        result.update(
+            {
+                "representation": "syndicated",
+                "canonical_request_url": representation.canonical_request_url,
+                "representation_url": representation.representation_url,
+                "original_publisher": representation.original_publisher,
+                "syndicated": representation.syndicated,
+                "attribution": representation.attribution,
+                "text_identity": representation.text_identity,
+            }
+        )
+        context.strategy_hit.append("yahoo_syndication_ok")
+        return result
+
+
 class MultiGatewayArchiveHandler(AsyncHandler):
     """Resilient archive ladder: archive.today/ph -> Wayback -> reader gateway.
 
@@ -974,18 +1153,27 @@ class _GatewayOutcome:
 class FirecrawlGatewayHandler(AsyncHandler):
     """Terminal cloud fallback: hand the URL to the caller's Firecrawl fleet.
 
-    Runs last in every plan when ``PAC_FIRECRAWL_API_KEY`` / ``FIRECRAWL_API_KEY``
-    is set.  Local engines (HTTP, Camoufox, archives) fail on hard bot walls;
-    Firecrawl's cloud fleet routinely clears them, so a subscription turns the
-    tail of the chain into a high-coverage safety net.  Output still passes the
-    shared quality gate -- a failed scrape never masquerades as an article.
+    Runs only when the outlet's retrieval policy permits cloud fallback and a
+    preceding attempt ended in an allowed bot/block failure. This keeps a
+    configured API key from turning every failed page into cloud spend. Output
+    still passes the shared quality gate -- a failed scrape never masquerades
+    as an article.
     """
 
     async def process(self, context: Context) -> dict[str, Any] | None:
+        from .retrieval_policy import may_use_firecrawl
+
+        if not may_use_firecrawl(context.domain, context.best_error_code):
+            context.strategy_hit.append("firecrawl_gateway_skipped_policy")
+            return None
+
         api_key = os.environ.get("PAC_FIRECRAWL_API_KEY", "").strip() or os.environ.get(
             "FIRECRAWL_API_KEY", ""
         ).strip()
         if not api_key:
+            return None
+        if not await context.options.cloud_budget.try_consume():
+            context.strategy_hit.append("firecrawl_gateway_skipped_budget")
             return None
 
         started_at = time.perf_counter()
@@ -1844,6 +2032,7 @@ def _build_handler_chain(plan: Sequence[str]) -> AsyncHandler:
         handlers.append(DirectHttpHandler())
     if "browser_cleanup" in plan:
         handlers.append(StealthBrowserHandler())
+    handlers.append(YahooSyndicationHandler())
     if any(step in {"archive_is", "archive_org"} for step in plan):
         handlers.append(MultiGatewayArchiveHandler())
     # Terminal cloud fallback: active whenever the caller has a Firecrawl key,
@@ -1874,6 +2063,9 @@ async def fetch_article(
     diagnostics: bool = False,
     request_id: str | None = None,
     cookie_header: str = "",
+    cloud_budget: CloudBudget | None = None,
+    article_title: str = "",
+    article_published_at: str = "",
 ) -> dict[str, Any]:
     """Fetch and extract an article through the asynchronous handler chain."""
 
@@ -1938,6 +2130,9 @@ async def fetch_article(
         full_markdown=full_markdown,
         plan=plan,
         cookie_header=resolved_cookie_header,
+        article_title=(article_title or "").strip(),
+        article_published_at=(article_published_at or "").strip(),
+        cloud_budget=cloud_budget or CloudBudget(1),
     )
 
     own_client = client is None

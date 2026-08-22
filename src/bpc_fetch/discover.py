@@ -1,15 +1,16 @@
-"""Lightweight article discovery via RSS, Sitemap, and Google News RSS.
+"""Lightweight article discovery via verified feeds, Bing, and title signals.
 
-Google News RSS commonly wraps publisher links in URL-safe Base64 protobuf
-payloads.  PAC decodes the legacy/local form without network access and only
-falls back to an SSRF-safe HTTP redirect resolution when local decoding cannot
-produce a trustworthy publisher URL.
+Google News RSS is retained only as a title-level safety net. Its wrapped URLs
+are never promoted to publisher URLs by the production discovery pipeline.
+Legacy decoder helpers remain below for compatibility with external callers.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import binascii
+from datetime import datetime, timezone
+import os
 import re
 import time
 import urllib.parse
@@ -19,6 +20,8 @@ from typing import Any, Iterable
 import httpx
 
 from .result import build_diagnostics, new_request_id
+from .source_policy import discovery_policy_for_domain
+from .source_registry import source_for_domain
 from .sites import domain_from_url
 from .ssrf import SSRFBlocked, assert_public_url
 
@@ -54,6 +57,124 @@ HEADERS = {
 _GOOGLE_NEWS_HOSTS = frozenset({"news.google.com", "www.news.google.com"})
 _GOOGLE_NEWS_PATH_MARKERS = frozenset({"articles", "read"})
 _URL_BYTES_RE = re.compile(rb"https?://[^\x00-\x20\x7f\"'<>\\]+", re.IGNORECASE)
+
+
+async def _safe_get_public_sitemap(url: str) -> httpx.Response:
+    """Fetch one public sitemap through native curl without credentials.
+
+    Some publishers serve public XML to the platform curl TLS fingerprint but
+    challenge Python HTTP clients. This fallback is restricted to an explicit
+    ``sitemap_articles`` policy and fails closed when curl is unavailable.
+    """
+    assert_public_url(url)
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "curl",
+            "--disable",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "20",
+            "--user-agent",
+            "PAC discovery sitemap/1.0",
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await process.communicate()
+    except (FileNotFoundError, OSError):
+        return httpx.Response(0, request=httpx.Request("GET", url))
+    if process.returncode != 0 or len(stdout) > DISCOVERY_MAX_PARSE_CHARS:
+        return httpx.Response(0, request=httpx.Request("GET", url))
+    return httpx.Response(
+        200,
+        headers={"content-type": "application/xml"},
+        content=stdout,
+        request=httpx.Request("GET", url),
+    )
+
+
+_REUTERS_ARTICLE_PATH = re.compile(
+    r"^/(?:technology|business|markets|legal)/.+-20\d{2}-\d{2}-\d{2}/?$",
+    re.IGNORECASE,
+)
+
+
+def _reuters_sitemap_page_count() -> int:
+    try:
+        return min(5, max(1, int(os.environ.get("PAC_REUTERS_SITEMAP_PAGES", "2"))))
+    except ValueError:
+        return 2
+
+
+def _reuters_article_links(markdown: str, links: Iterable[str], date_text: str) -> list[dict[str, str]]:
+    """Extract Reuters finance/technology article URLs from one daily sitemap page."""
+    title_by_url = {
+        url: title.strip()
+        for title, url in re.findall(r"\[([^\]]+)]\((https://www\.reuters\.com/[^)]+)\)", markdown or "")
+    }
+    articles: list[dict[str, str]] = []
+    for url in dict.fromkeys(str(value) for value in links):
+        parsed = urllib.parse.urlparse(url)
+        host = (parsed.hostname or "").casefold().removeprefix("www.")
+        if host != "reuters.com" or not _REUTERS_ARTICLE_PATH.match(parsed.path):
+            continue
+        articles.append(
+            {
+                "title": title_by_url.get(url, ""),
+                "url": _canonical_discovery_url(url),
+                "published": date_text,
+                "discovery_source": "official_daily_sitemap",
+            }
+        )
+    return _dedupe_feed_articles(articles)
+
+
+async def _discover_reuters_daily_sitemap(client: httpx.AsyncClient) -> list[dict[str, str]]:
+    """Use a bounded Firecrawl scrape of Reuters' official UTC daily sitemap.
+
+    Reuters exposes public daily sitemap pages but challenges direct local HTTP.
+    This makes at most ``PAC_REUTERS_SITEMAP_PAGES`` credential-free cloud
+    discovery calls, then lets the caller fall back to Bing on any failure.
+    """
+    api_key = os.environ.get("PAC_FIRECRAWL_API_KEY", "").strip() or os.environ.get(
+        "FIRECRAWL_API_KEY", ""
+    ).strip()
+    if not api_key:
+        return []
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    year, month, day = date.split("-")
+    articles: list[dict[str, str]] = []
+    for page in range(1, _reuters_sitemap_page_count() + 1):
+        sitemap_url = f"https://www.reuters.com/sitemap/{year}-{month}/{day}/{page}/"
+        try:
+            response = await client.post(
+                "https://api.firecrawl.dev/v1/scrape",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"url": sitemap_url, "formats": ["markdown", "links"]},
+                timeout=30.0,
+            )
+        except httpx.HTTPError:
+            break
+        if response.status_code != 200:
+            break
+        try:
+            data = response.json().get("data") or {}
+            page_articles = _reuters_article_links(
+                str(data.get("markdown") or ""),
+                data.get("links") or [],
+                date,
+            )
+        except (TypeError, ValueError):
+            break
+        if not page_articles:
+            break
+        articles.extend(page_articles)
+    return _dedupe_feed_articles(articles)
 
 
 async def _safe_get(
@@ -111,6 +232,107 @@ def _discovery_warning(stage: str, exc: BaseException) -> str:
     return f"{stage}:{exc.__class__.__name__}{suffix}"
 
 
+def _canonical_feed_article_url(url: str) -> str:
+    """Use the publisher path as a dedupe key while preserving the returned URL."""
+    parsed = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme.casefold(), parsed.netloc.casefold(), parsed.path, "", "")
+    )
+
+
+def _dedupe_feed_articles(articles: Iterable[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep the first occurrence of each publisher article across feed scopes."""
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for article in articles:
+        url = article.get("url", "")
+        if not url:
+            continue
+        key = _canonical_feed_article_url(url)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(article)
+    return unique
+
+
+def _feed_scope_matches_query(scope: str, search_query: str | None) -> bool:
+    """Use a verified topic feed only when its scope matches the query."""
+    if not search_query:
+        return True
+    query = search_query.casefold().replace("-", " ")
+    normalized_scope = scope.casefold().replace("-", " ")
+    if normalized_scope == "general":
+        return False
+    ai_terms = {"ai", "artificial intelligence", "machine learning"}
+    if normalized_scope == "artificial intelligence":
+        return any(term in query for term in ai_terms)
+    return normalized_scope in query or query in normalized_scope
+
+
+def _canonical_discovery_url(url: str) -> str:
+    """Remove known Feed tracking parameters before cross-feed de-duplication."""
+    parsed = urllib.parse.urlparse(url)
+    ignored = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "source"}
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    kept = [
+        (key, value)
+        for key, value in query
+        if key.casefold() not in ignored
+        and not key.casefold().startswith("utm_")
+        and not key.casefold().startswith("syn-")
+    ]
+    path = parsed.path.rstrip("/") or "/"
+    return urllib.parse.urlunparse(
+        (parsed.scheme.casefold(), parsed.netloc.casefold(), path, "", urllib.parse.urlencode(kept), "")
+    )
+
+
+def _publisher_feed_articles(
+    articles: list[dict[str, str]],
+    domain: str,
+    feed_url: str,
+    scope: str,
+) -> list[dict[str, str]]:
+    """Keep publisher URLs and attach non-secret discovery provenance."""
+    values: list[dict[str, str]] = []
+    for article in articles:
+        url = str(article.get("url") or "")
+        host = (urllib.parse.urlparse(url).hostname or "").casefold().removeprefix("www.")
+        if not url.startswith("http") or not (host == domain or host.endswith(f".{domain}")):
+            continue
+        values.append(
+            {
+                **article,
+                "url": _canonical_discovery_url(url),
+                "discovery_source": "official_feed",
+                "feed_url": feed_url,
+                "feed_scope": scope,
+            }
+        )
+    return values
+
+
+def _dedupe_discovery_articles(articles: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Keep the first occurrence of each canonical publisher URL."""
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for article in articles:
+        key = str(article.get("url") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(article)
+    return unique
+
+
+def _configured_source_domain(target: str) -> str:
+    """Prefer an exact configured media host over its registrable domain."""
+    candidate_url = target if target.startswith(("http://", "https://")) else f"https://{target}"
+    host = (urllib.parse.urlparse(candidate_url).hostname or "").casefold().removeprefix("www.")
+    return host
+
+
 async def discover_articles(
     target: str,
     *,
@@ -125,6 +347,8 @@ async def discover_articles(
     articles: list[dict[str, str]] = []
     source_type = "unknown"
     source_url = target
+    source_urls: list[str] = []
+    title_signals: list[dict[str, str]] = []
     warnings: list[str] = []
     started_at = time.perf_counter()
     diagnostic_request_id = (request_id or new_request_id()) if diagnostics else ""
@@ -166,18 +390,105 @@ async def discover_articles(
         follow_redirects=False,
     ) as client:
         if search_query or not target.startswith("http"):
-            domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-            domain = domain_from_url(target if target.startswith("http") else f"https://{target}")
+            configured_domain = _configured_source_domain(target)
+            source = source_for_domain(configured_domain)
+            domain = source.domain if source is not None else domain_from_url(
+                target if target.startswith("http") else f"https://{target}"
+            )
             scoped = bool(search_query) or "." in target
             query = f"site:{domain} {search_query}".strip() if search_query else f"site:{domain}"
 
-            # Plain keyword queries hit Bing News RSS first: item links embed
-            # the publisher URL (apiclick.aspx?...&url=<encoded>), so no Google
-            # News token decoding is needed at all.  Bing News RSS also honours
-            # the ``site:`` operator (verified 2026-08), so scoped queries stay
-            # on Bing and keep the domain restriction.
+            # Aggregate every health-verified Feed for the outlet. A topic
+            # query narrows this to matching Feed scopes; a no-query run uses
+            # the full outlet bundle for maximum discovery coverage.
+            policy = discovery_policy_for_domain(domain)
+            scope_by_url = {
+                feed.url: feed.scope for feed in source.feeds
+            } if source is not None else {}
+            feed_urls = (
+                list(policy.feed_urls)
+                if policy and policy.discovery_mode in {"all_verified_feeds", "sitemap_articles"}
+                else []
+            )
+            if search_query:
+                feed_urls = [
+                    feed_url for feed_url in feed_urls
+                    if _feed_scope_matches_query(scope_by_url.get(feed_url, "general"), search_query)
+                ]
+            feed_limiter = asyncio.Semaphore(4)
+
+            async def fetch_official_feed(feed_url: str) -> tuple[str, list[dict[str, str]]]:
+                try:
+                    async with feed_limiter:
+                        if policy and policy.discovery_mode == "sitemap_articles":
+                            response = await _safe_get_public_sitemap(feed_url)
+                            if diagnostics:
+                                diagnostic_attempts.append({
+                                    "handler": "Discovery",
+                                    "label": "official_sitemap_curl",
+                                    "engine": "discover_curl",
+                                    "status": int(response.status_code),
+                                    "elapsed_ms": 0,
+                                    "error_code": "" if response.status_code == 200 else "NETWORK",
+                                    "error": "",
+                                    "quality_reason": "",
+                                })
+                        else:
+                            response = await diagnostic_get("official_feed", client, feed_url)
+                    if response.status_code != 200:
+                        return feed_url, []
+                    parsed = (
+                        _parse_sitemap(response.text, limit=effective_limit)
+                        if policy and policy.discovery_mode == "sitemap_articles"
+                        else _parse_rss(response.text, limit=effective_limit)
+                    )
+                    if policy and policy.discovery_mode == "sitemap_articles":
+                        parsed = [
+                            article
+                            for article in parsed
+                            if article.get("url", "").rstrip("/")
+                            != "https://www.theinformation.com/articles"
+                        ]
+                    return feed_url, [
+                        {
+                            **article,
+                            "discovery_source": "official_sitemap"
+                            if policy and policy.discovery_mode == "sitemap_articles"
+                            else "official_feed",
+                            "discovery_feed_url": feed_url,
+                            "discovery_feed_scope": scope_by_url.get(feed_url, "general"),
+                        }
+                        for article in parsed
+                    ]
+                except Exception as exc:
+                    warnings.append(_discovery_warning("official_feed", exc))
+                    return feed_url, []
+
+            feed_results = await asyncio.gather(*(fetch_official_feed(feed_url) for feed_url in feed_urls))
+            feed_articles = [article for _, values in feed_results for article in values]
+            successful_feed_urls = [feed_url for feed_url, values in feed_results if values]
+            if feed_articles:
+                articles = _dedupe_feed_articles(feed_articles)
+                source_type = (
+                    "official_sitemap"
+                    if policy and policy.discovery_mode == "sitemap_articles"
+                    else "official_feeds"
+                )
+                source_url = successful_feed_urls[0]
+                source_urls = successful_feed_urls
+
+            if not articles and policy and policy.discovery_mode == "firecrawl_daily_sitemap":
+                reuters_articles = await _discover_reuters_daily_sitemap(client)
+                if reuters_articles:
+                    articles = reuters_articles
+                    source_type = "official_daily_sitemap"
+                    source_url = "https://www.reuters.com/sitemap/"
+                    source_urls = [source_url]
+
+            # Bing News RSS supplies publisher URLs for search gaps. Its
+            # ``site:`` operator keeps scoped queries on the requested outlet.
             bing_query = query if scoped else (search_query or target)
-            if bing_query:
+            if not articles and bing_query:
                 encoded_bing = urllib.parse.quote(bing_query)
                 bing_news_url = (
                     f"https://www.bing.com/news/search?q={encoded_bing}&format=rss&setmkt=en-US&setlang=en"
@@ -204,10 +515,16 @@ async def discover_articles(
                 try:
                     response = await diagnostic_get("google_news", client, google_news_url)
                     if response.status_code == 200:
-                        articles = _parse_rss(response.text, limit=effective_limit)
-                        if articles:
-                            articles = await _resolve_google_news_articles(articles, client)
-                            source_type = "google_news_rss"
+                        title_signals = [
+                            {
+                                "title": article.get("title", ""),
+                                "published": article.get("published", ""),
+                                "url": "",
+                                "source": "google_news_title_only",
+                                "kind": "title_signal",
+                            }
+                            for article in _parse_rss(response.text, limit=effective_limit)
+                        ]
                 except Exception as exc:
                     warnings.append(_discovery_warning("google_news", exc))
         if not articles:
@@ -230,7 +547,6 @@ async def discover_articles(
                             limit=effective_limit,
                         )
                         if articles:
-                            articles = await _resolve_google_news_articles(articles, client)
                             source_type = "rss_feed"
                             source_url = base_url
                     else:
@@ -241,7 +557,7 @@ async def discover_articles(
                                 if rss_response.status_code == 200:
                                     parsed = _parse_rss(rss_response.text, limit=effective_limit)
                                     if parsed:
-                                        articles = await _resolve_google_news_articles(parsed, client)
+                                        articles = parsed
                                         source_type = "rss_link"
                                         source_url = rss_url
                                         break
@@ -259,7 +575,7 @@ async def discover_articles(
                         if response.status_code == 200:
                             parsed = _parse_rss(response.text, limit=effective_limit)
                             if parsed:
-                                articles = await _resolve_google_news_articles(parsed, client)
+                                articles = parsed
                                 source_type = "rss_probe"
                                 source_url = probe_url
                                 break
@@ -283,7 +599,11 @@ async def discover_articles(
                         warnings.append(_discovery_warning("sitemap_probe", exc))
                         continue
 
-    domain = domain_from_url(target if target.startswith("http") else f"https://{target}")
+    configured_domain = _configured_source_domain(target)
+    configured_source = source_for_domain(configured_domain)
+    domain = configured_source.domain if configured_source is not None else domain_from_url(
+        target if target.startswith("http") else f"https://{target}"
+    )
     urls = [article["url"] for article in articles if article.get("url")]
     next_command = f"pac batch {' '.join(urls[:3])} --compact" if urls else "pac fetch <url>"
 
@@ -292,8 +612,10 @@ async def discover_articles(
         "domain": domain,
         "source_type": source_type,
         "source_url": source_url,
+        "source_urls": source_urls or ([source_url] if source_type != "unknown" else []),
         "count": len(articles),
         "articles": articles[:effective_limit],
+        "title_signals": title_signals[:effective_limit],
         "next_command": next_command,
         "warnings": list(dict.fromkeys(warnings)),
     }
@@ -307,6 +629,8 @@ async def discover_articles(
     return result
 
 
+# Compatibility-only helpers for external callers. `discover_articles()` no
+# longer invokes these decoders or treats Google wrappers as fetchable URLs.
 def is_google_news_url(url: str) -> bool:
     """Return whether *url* is a Google News encoded article/read URL."""
 

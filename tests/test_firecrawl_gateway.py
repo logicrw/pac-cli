@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from bpc_fetch.strategy import Context, FirecrawlGatewayHandler
+from bpc_fetch.strategy import CloudBudget, Context, FirecrawlGatewayHandler
 
 
 class _Opts:
@@ -16,16 +16,20 @@ class _Opts:
     cookie_header = ""
 
 
-def _context(client):
-    return Context(
-        url="https://example.com/article",
-        domain="example.com",
+def _context(client, domain="wsj.com", failure_code="BOT_CHALLENGE", cloud_max_calls=1):
+    options = _Opts()
+    options.cloud_budget = CloudBudget(cloud_max_calls)
+    context = Context(
+        url=f"https://www.{domain}/article",
+        domain=domain,
         strategy=None,
-        options=_Opts(),
+        options=options,
         client=client,
         started_at=time.perf_counter(),
         attempts=[],
     )
+    context.best_error_code = failure_code
+    return context
 
 
 def test_handler_silent_when_no_api_key(monkeypatch):
@@ -48,6 +52,38 @@ def test_handler_records_attempt_on_http_error(monkeypatch):
     assert result is None
 
 
+def test_handler_skips_policy_denied_outlet_before_cloud_request(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test")
+    calls = []
+
+    class _Client:
+        async def post(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("policy denied outlet must not call Firecrawl")
+
+    handler = FirecrawlGatewayHandler()
+    result = asyncio.run(_run(handler, _Client(), domain="bloomberg.com"))
+
+    assert result is None
+    assert calls == []
+
+
+def test_handler_skips_when_shared_cloud_budget_is_exhausted(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test")
+    calls = []
+
+    class _Client:
+        async def post(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("exhausted budget must not call Firecrawl")
+
+    handler = FirecrawlGatewayHandler()
+    result = asyncio.run(_run(handler, _Client(), cloud_max_calls=0))
+
+    assert result is None
+    assert calls == []
+
+
 def test_handler_empty_markdown_returns_none(monkeypatch):
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test")
 
@@ -66,8 +102,8 @@ def test_handler_empty_markdown_returns_none(monkeypatch):
     assert result is None
 
 
-async def _run(handler, client):
-    ctx = _context(client)
+async def _run(handler, client, **context_kwargs):
+    ctx = _context(client, **context_kwargs)
     try:
         if hasattr(client, "aclose"):
             async with client:

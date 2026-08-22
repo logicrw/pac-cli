@@ -1,0 +1,354 @@
+{
+  "schema_version": 1,
+  "purpose": "Explicit retrieval policy for PAC final 29 selected outlets.",
+  "policies": [
+    {
+      "domain": "bloomberg.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "never",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "yahoo_bloomberg_candidate",
+      "failure_mode": "paywall_remaining"
+    },
+    {
+      "domain": "reuters.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "wsj.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "ft.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "never",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "paywall_remaining"
+    },
+    {
+      "domain": "economist.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "paywall_remaining"
+    },
+    {
+      "domain": "cnbc.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "fortune.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "forbes.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "marketwatch.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "barrons.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "paywall_remaining"
+    },
+    {
+      "domain": "businessinsider.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "techcrunch.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "theverge.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "wired.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "arstechnica.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "technologyreview.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "theinformation.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_required_for_fulltext",
+      "firecrawl_mode": "never",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "paywall_remaining"
+    },
+    {
+      "domain": "venturebeat.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "fastcompany.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "politico.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "asia.nikkei.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "semafor.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "nytimes.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "washingtonpost.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "axios.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "scmp.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "theregister.com",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "404media.co",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    },
+    {
+      "domain": "sifted.eu",
+      "browser_mode": "render_only",
+      "credential_mode": "vault_optional",
+      "firecrawl_mode": "on_bot_or_http_block",
+      "firecrawl_failure_codes": [
+        "BOT_CHALLENGE",
+        "HTTP_BLOCKED"
+      ],
+      "representation_mode": "publisher_page",
+      "failure_mode": "honest_failure"
+    }
+  ]
+}

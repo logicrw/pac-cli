@@ -1,0 +1,930 @@
+{
+  "schema_version": 1,
+  "purpose": "Final 29-source configuration migrated from news-scraper-final current working registry; only verified feeds may be used automatically.",
+  "sources": [
+    {
+      "domain": "bloomberg.com",
+      "name": "Bloomberg",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.bloomberg.com/feeds/markets/news.rss",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.bloomberg.com/feeds/business/news.rss",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.bloomberg.com/feeds/economics/news.rss",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.bloomberg.com/feeds/industries/news.rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.bloomberg.com/feeds/politics/news.rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.bloomberg.com/feeds/technology/news.rss",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "reuters.com",
+      "name": "Reuters",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": []
+    },
+    {
+      "domain": "wsj.com",
+      "name": "Wall Street Journal",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+          "scope": "world",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/RSSWorldNews",
+          "scope": "world",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.a.dj.com/rss/RSSWSJD.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/RSSOpinion",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/WSJcomUSBusiness",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/RSSWSJD",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/socialpoliticsfeed",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "ft.com",
+      "name": "Financial Times",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.ft.com/companies?format=rss",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/markets?format=rss",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/opinion?format=rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/technology?format=rss",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/world?format=rss",
+          "scope": "world",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/rss/home/international",
+          "scope": "world",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.ft.com/artificial-intelligence?format=rss",
+          "scope": "artificial-intelligence",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "economist.com",
+      "name": "The Economist",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.economist.com/asia/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/briefing/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/britain/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/business/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/china/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/europe/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/finance-and-economics/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/international/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/leaders/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/middle-east-and-africa/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/science-and-technology/rss.xml",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/the-americas/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.economist.com/united-states/rss.xml",
+          "scope": "finance",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "cnbc.com",
+      "name": "CNBC",
+      "focus": [
+        "finance"
+      ],
+      "feeds": [
+        {
+          "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "fortune.com",
+      "name": "Fortune",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://content.fortune.com/feed/",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://content.fortune.com/feed/atom/",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://fortune.com/feed/fortune-feeds/?id=3230629",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://fortune.com/feed/fortune-feeds/?id=3230629&paged=2",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "forbes.com",
+      "name": "Forbes",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.forbes.com/business/feed/",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.forbes.com/innovation/feed/",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "marketwatch.com",
+      "name": "MarketWatch",
+      "focus": [
+        "finance"
+      ],
+      "feeds": [
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/mw_bulletins",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "barrons.com",
+      "name": "Barron's",
+      "focus": [
+        "finance"
+      ],
+      "feeds": []
+    },
+    {
+      "domain": "businessinsider.com",
+      "name": "Business Insider",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://feeds.businessinsider.com/custom/all",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://markets.businessinsider.com/rss/news",
+          "scope": "finance",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "techcrunch.com",
+      "name": "TechCrunch",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://techcrunch.com/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/feed/atom/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/apps/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+          "scope": "artificial-intelligence",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/fintech/feed/",
+          "scope": "fintech",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/security/feed/",
+          "scope": "security",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/space/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/transportation/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/gadgets/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/venture/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://techcrunch.com/category/startups/feed/",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "theverge.com",
+      "name": "The Verge",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.theverge.com/rss/index.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+          "scope": "artificial-intelligence",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theverge.com/rss/policy/index.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theverge.com/rss/reviews/index.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theverge.com/rss/science/index.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theverge.com/rss/tech/index.xml",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "wired.com",
+      "name": "Wired",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.wired.com/feed/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/backchannel/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/business/latest/rss",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/culture/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/gear/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/ideas/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/science/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/category/security/latest/rss",
+          "scope": "security",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/tag/wired-guide/latest/rss",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed/tag/ai/latest/rss",
+          "scope": "artificial-intelligence",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.wired.com/feed",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "arstechnica.com",
+      "name": "Ars Technica",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/index",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/apple",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/business",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/gadgets",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/gaming",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/science",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/tech-policy",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.arstechnica.com/arstechnica/technology-lab",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "technologyreview.com",
+      "name": "MIT Technology Review",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.technologyreview.com/feed/atom",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.technologyreview.com/feed/rss",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+          "scope": "artificial-intelligence",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.technologyreview.com/topic/computing/feed/",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.technologyreview.com/feed",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "theinformation.com",
+      "name": "The Information",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.theinformation.com/feed",
+          "scope": "general",
+          "status": "disabled"
+        }
+      ]
+    },
+    {
+      "domain": "venturebeat.com",
+      "name": "VentureBeat",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://venturebeat.com/feed",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://venturebeat.com/category/ai/feed",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://venturebeat.com/category/security/feed",
+          "scope": "security",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "fastcompany.com",
+      "name": "Fast Company",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.fastcompany.com/technology/rss",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.feedburner.com/fastcompany/headlines",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.fastcompany.com/latest/rss",
+          "scope": "business",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "politico.com",
+      "name": "Politico",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://rss.politico.com/congress.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.politico.com/politics-news.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.politico.com/technology.xml",
+          "scope": "technology",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "asia.nikkei.com",
+      "name": "Nikkei Asia",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://asia.nikkei.com/rss/feed/nar",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "semafor.com",
+      "name": "Semafor",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.semafor.com/rss.xml",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "nytimes.com",
+      "name": "The New York Times",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+          "scope": "technology",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",
+          "scope": "finance",
+          "status": "verified"
+        },
+        {
+          "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+          "scope": "world",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "washingtonpost.com",
+      "name": "The Washington Post",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://feeds.washingtonpost.com/rss/national",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.washingtonpost.com/rss/world",
+          "scope": "world",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.washingtonpost.com/rss/politics",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.washingtonpost.com/rss/business",
+          "scope": "business",
+          "status": "verified"
+        },
+        {
+          "url": "https://feeds.washingtonpost.com/rss/opinions",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "axios.com",
+      "name": "Axios",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://api.axios.com/feed/",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.axios.com/feeds/feed.rss",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "scmp.com",
+      "name": "South China Morning Post",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.scmp.com/rss/91/feed",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.scmp.com/rss/36/feed",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.scmp.com/rss/4/feed",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.scmp.com/rss/2/feed",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.scmp.com/rss/92/feed",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "theregister.com",
+      "name": "The Register",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.theregister.com/headlines.atom",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.theregister.com/headlines.rss",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "404media.co",
+      "name": "404 Media",
+      "focus": [
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://www.404media.co/feed",
+          "scope": "general",
+          "status": "verified"
+        },
+        {
+          "url": "https://www.404media.co/rss",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    },
+    {
+      "domain": "sifted.eu",
+      "name": "Sifted",
+      "focus": [
+        "finance",
+        "technology"
+      ],
+      "feeds": [
+        {
+          "url": "https://sifted.eu/feed",
+          "scope": "general",
+          "status": "verified"
+        }
+      ]
+    }
+  ]
+}
